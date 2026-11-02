@@ -36,12 +36,17 @@ repo so nothing is lost when Colab disconnects.
 ## Setup (Colab terminal)
 
 ```bash
+pip install uv
 git clone https://github.com/hBouanane/darija-asr.git && cd darija-asr
-export HF_TOKEN=...            # write access, for the gated model and hub_repo
-bash scripts/colab_setup.sh asr
+uv sync --extra asr          # Cohere + Voxtral
+# uv sync --extra moulsot    # MoulSot.0.3 instead; it needs an older transformers, so the extras conflict
+# uv sync                    # no GPU stages: agree, merge, labels, eval
+export HF_TOKEN=...          # write access: gated Cohere model + hub_repo
+export ANTHROPIC_API_KEY=... # only for `merge`
 ```
 
 Set `hub_repo` in `configs/base.yaml` (e.g. `your-username/darija-asr-work`).
+Run every command below as `uv run darija ...` (or `uv run python -m darija_asr ...`) from the repo root.
 
 ## Workflow
 
@@ -51,7 +56,7 @@ darija prepare     -c configs/gold.yaml
 darija smoke       -c configs/gold.yaml --model cohere      # sanity-check output + speed first
 darija transcribe  -c configs/gold.yaml --model cohere
 darija transcribe  -c configs/gold.yaml --model voxtral
-darija transcribe  -c configs/gold.yaml --model moulsot     # separate session: colab_setup.sh moulsot
+darija transcribe  -c configs/gold.yaml --model moulsot     # after: uv sync --extra moulsot
 darija agree       -c configs/gold.yaml
 darija merge       -c configs/gold.yaml                     # mode: all -> every clip judged
 darija labels      -c configs/gold.yaml

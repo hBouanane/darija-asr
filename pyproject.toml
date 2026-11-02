@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Cohere + Voxtral. Install in the Colab session that runs transcription.
+# Cohere + Voxtral:  uv sync --extra asr
 asr = [
     "torch",
     "transformers>=5.4.0",
@@ -33,13 +33,19 @@ asr = [
     "protobuf",
     "mistral-common[audio]",
 ]
-# MoulSot.0.3 (Qwen3-ASR fine-tune). qwen_asr may pin its own transformers
-# version, so install it in a separate Colab session from the `asr` extra.
+# MoulSot.0.3 (Qwen3-ASR fine-tune):  uv sync --extra moulsot
 moulsot = ["torch", "qwen_asr"]
+
+[dependency-groups]
 dev = ["pytest"]
 
 [project.scripts]
 darija = "darija_asr.cli:main"
+
+[tool.uv]
+# qwen_asr pins its own transformers version, so the two model stacks are
+# resolved separately and never installed into the same environment.
+conflicts = [[{ extra = "asr" }, { extra = "moulsot" }]]
 
 [tool.setuptools.packages.find]
 where = ["src"]
