@@ -11,8 +11,7 @@ source:
 
 select:
   n: 30000
-  files: 60
-  max_per_channel: 400
+  max_per_channel: 400      # extra-gt files hold 1-3 channels each; all 242 are read for metadata
 
 agreement:
   sources: [cohere, voxtral]       # + moulsot

@@ -10,7 +10,6 @@ source:
 
 select:
   n: 5000
-  files: 12
 
 agreement:
   sources: [reference, cohere, voxtral]

@@ -17,6 +17,20 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def apply_overrides(cfg: dict, overrides: list[str]) -> dict:
+    """`select.n=30` style overrides; values are parsed as YAML (numbers, lists, null)."""
+    for item in overrides:
+        key, sep, raw = item.partition("=")
+        if not sep:
+            raise SystemExit(f"--set expects key=value, got {item!r}")
+        node = cfg
+        *parents, leaf = key.strip().split(".")
+        for part in parents:
+            node = node.setdefault(part, {})
+        node[leaf] = yaml.safe_load(raw)
+    return cfg
+
+
 def load_config(path: str | Path) -> dict:
     path = Path(path)
     with open(path, encoding="utf-8") as f:

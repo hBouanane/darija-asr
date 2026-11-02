@@ -51,6 +51,20 @@ Run every command below as `uv run darija ...` (or `uv run python -m darija_asr 
 ## Workflow
 
 ```bash
+# 0. Pilot: 30 clips, check each model's output, speed, and the judge, before anything big
+P="-c configs/gold.yaml --set run_name=pilot --set select.n=30"
+darija prepare    $P
+darija smoke      $P --model cohere -n 10    # read the output next to the reference
+darija smoke      $P --model voxtral -n 10   # fp16 on a T4: check it isn't garbage
+darija transcribe $P --model cohere
+darija transcribe $P --model voxtral
+darija agree      $P --set agreement.sources=[reference,cohere,voxtral]
+darija merge      $P --set agreement.sources=[reference,cohere,voxtral]
+#    -> read work/pilot/merge/*.parquet next to the candidates
+
+# Before choosing selection settings for a split:
+darija stats -c configs/extra_v1.yaml        # clips/channel, pesq, duration histogram
+
 # 1. Gold set: sample, transcribe with every model, judge everything, export for correction
 darija prepare     -c configs/gold.yaml
 darija smoke       -c configs/gold.yaml --model cohere      # sanity-check output + speed first
@@ -80,6 +94,10 @@ darija build-train -c configs/calib.yaml -c configs/extra_v1.yaml --out your-use
 ```
 
 Notes:
+- Any config value can be overridden on the command line: `--set select.n=30 --set select.duration=[2,20]`.
+- Selection (`select:`): `n` clips and/or `hours` of audio, `duration` range in seconds (default 3-15,
+  measured on the audio itself), `pesq_min`, `max_per_channel`. Clips are taken row group by row group,
+  round-robin across channels, so a run covers as many channels as possible.
 - Every stage is resumable. `transcribe` skips finished ids. Split a run across sessions
   with `--shard i --num-shards n`. On a fresh VM, `darija pull -c <config>` restores the run.
 - `merge --mode sync` gives fast feedback on small runs. Batch mode costs 50% less and

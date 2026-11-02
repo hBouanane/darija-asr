@@ -15,12 +15,12 @@ source:
   has_reference: true       # the split has a `text` column (Gemini 2.5 Pro transcripts)
 
 select:
-  n: 1000                   # clips to put in the working set
-  files: null               # how many parquet files to sample from (null = all)
-  min_duration: 1.5
-  max_duration: 25.0
-  min_pesq: 2.5
+  n: 1000                   # clips to put in the working set ...
+  hours: null               # ... or a target amount of audio; stops at whichever comes first
+  duration: [3, 15]         # seconds, measured on the audio itself
+  pesq_min: 2.5             # perceptual quality floor (all *-gt-2.5 clips already pass 2.5)
   max_per_channel: 200      # caps over-represented YouTube channels
+  files: null               # parquet files to sample from (null = all)
   shard_size: 500           # clips per working-set parquet shard
   seed: 13
   exclude_ids:              # files with one id per line, never selected (gold set)

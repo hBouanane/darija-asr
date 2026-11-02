@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 
-from .config import load_config
+from .config import apply_overrides, load_config
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -13,7 +13,13 @@ def main(argv: list[str] | None = None) -> None:
     def cmd(name: str, help_: str) -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("--config", "-c", required=True)
+        sp.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", dest="overrides",
+                        help="override a config value, e.g. --set select.n=30 (repeatable)")
         return sp
+
+    sp = cmd("stats", "show clip/channel/pesq/duration distributions of the source split")
+    sp.add_argument("--sample-groups", type=int, default=3,
+                    help="row groups (~100 MB each) to download for durations when the split has none")
 
     sp = cmd("prepare", "sample clips from MoulSot-Full into the run's working set")
     sp.add_argument("--force", action="store_true", help="rebuild an existing working set")
@@ -65,8 +71,12 @@ def main(argv: list[str] | None = None) -> None:
                     args.valid_fraction, push=args.push)
         return
 
-    cfg = load_config(args.config)
-    if args.cmd == "prepare":
+    cfg = apply_overrides(load_config(args.config), args.overrides)
+    if args.cmd == "stats":
+        from .data.stats import stats
+
+        stats(cfg, args.sample_groups)
+    elif args.cmd == "prepare":
         from .data.select import prepare
 
         prepare(cfg, force=args.force)
