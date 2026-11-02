@@ -1,0 +1,19 @@
+# Iteration 2: new clips from extra-gt-2.5 (no reference text). Only the ASR
+# models vote. Add `moulsot` to sources (after transcribing with it) to get a
+# third, Darija-specialised voter as a tie-breaker.
+extends: base.yaml
+run_name: extra-gt-v1
+
+source:
+  config: extra-gt-2.5
+  split: train
+  has_reference: false
+
+select:
+  n: 30000
+  files: 60
+  max_per_channel: 400
+
+agreement:
+  sources: [cohere, voxtral]       # + moulsot
+  prefer: [cohere, voxtral]

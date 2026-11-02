@@ -1,0 +1,20 @@
+# Gold set: clips from the held-out MoulSot test split. Run the whole pipeline on
+# it (all models + merge in `all` mode), then hand-correct gold/gold.csv.
+# Every other run excludes these ids via resources/gold_ids.txt.
+extends: base.yaml
+run_name: gold
+
+source:
+  config: 100-gt-2.5
+  split: test
+
+select:
+  n: 400
+  max_per_channel: 25
+  exclude_ids: []
+
+agreement:
+  sources: [reference, cohere, voxtral, moulsot]
+
+merge:
+  mode: all

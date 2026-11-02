@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Pipeline outputs live in the work dir and are synced to the HF Hub, not git.
+work/
+*.parquet
+*.wav
+
+.env

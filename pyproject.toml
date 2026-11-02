@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "darija-asr"
+version = "0.1.0"
+description = "Multi-ASR + LLM-judge pipeline for building a cleaner Moroccan Darija ASR dataset (MoulSot), evaluating it, and preparing training data."
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "soundfile",
+    "librosa",
+    "huggingface_hub>=0.30",
+    "datasets>=3.0",
+    "rapidfuzz>=3.0",
+    "jiwer>=3.0",
+    "tabulate",
+    "anthropic",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# Cohere + Voxtral. Install in the Colab session that runs transcription.
+asr = [
+    "torch",
+    "transformers>=5.4.0",
+    "accelerate",
+    "sentencepiece",
+    "protobuf",
+    "mistral-common[audio]",
+]
+# MoulSot.0.3 (Qwen3-ASR fine-tune). qwen_asr may pin its own transformers
+# version, so install it in a separate Colab session from the `asr` extra.
+moulsot = ["torch", "qwen_asr"]
+dev = ["pytest"]
+
+[project.scripts]
+darija = "darija_asr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

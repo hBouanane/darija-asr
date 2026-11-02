@@ -1,0 +1,64 @@
+# Shared defaults. Every run config does `extends: base.yaml` and overrides what it needs.
+
+# Local working directory. On Colab keep it on /content (fast disk) and rely on
+# hub_repo for persistence, since the VM is wiped on disconnect.
+workdir: work
+
+# Private HF dataset repo used to persist every stage's output across Colab
+# sessions, e.g. "your-username/darija-asr-work". null = local only.
+hub_repo: null
+
+source:
+  dataset: atlasia/MoulSot-Full
+  config: 100-gt-2.5        # folder in the dataset repo
+  split: train
+  has_reference: true       # the split has a `text` column (Gemini 2.5 Pro transcripts)
+
+select:
+  n: 1000                   # clips to put in the working set
+  files: null               # how many parquet files to sample from (null = all)
+  min_duration: 1.5
+  max_duration: 25.0
+  min_pesq: 2.5
+  max_per_channel: 200      # caps over-represented YouTube channels
+  shard_size: 500           # clips per working-set parquet shard
+  seed: 13
+  exclude_ids:              # files with one id per line, never selected (gold set)
+    - resources/gold_ids.txt
+
+asr:
+  flush_every: 200          # write a parquet part (and push to hub) every N clips
+  models:
+    cohere:
+      repo: CohereLabs/cohere-transcribe-arabic-07-2026
+      language: ar
+      batch_size: 8
+      max_new_tokens: 256
+      dtype: auto           # auto = bf16 if the GPU supports it, else fp16 (T4)
+    voxtral:
+      repo: mistralai/Voxtral-Mini-4B-Realtime-Arabic
+      batch_size: 1
+      dtype: auto
+      generate_kwargs: {}
+    moulsot:
+      repo: atlasia/moulsot.v0.3
+      language: Arabic
+      dtype: auto
+
+agreement:
+  # Which transcripts take part. `reference` = the dataset's Gemini text.
+  sources: [reference, cohere, voxtral]
+  # Text used for clips routed to `accept`, first available wins.
+  prefer: [reference, cohere, voxtral]
+  accept_cer: 0.05          # every pair within this CER  -> accept without LLM
+  drop_cer: 0.60            # every pair beyond this CER  -> drop (unreliable clip)
+
+merge:
+  mode: disagreements       # disagreements = only route=llm; all = every non-dropped clip
+  model: claude-opus-5-5
+  effort: medium
+  max_tokens: 16000
+  workers: 8                # parallel requests in sync mode
+  reveal_sources: false     # true = tell the LLM which system produced each candidate
+  style_guide: resources/style_guide.md
+  lexicon: null             # optional TSV (e.g. built from DODa): columns word, note

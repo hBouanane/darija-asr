@@ -1,0 +1,17 @@
+# Iteration 1: calibration on the subset MoulSot was trained on. Three sources
+# (Gemini reference + Cohere + Voxtral) let us tune the thresholds and the
+# prompt before spending compute on extra-gt-2.5.
+extends: base.yaml
+run_name: calib-100gt
+
+source:
+  config: 100-gt-2.5
+  split: train
+
+select:
+  n: 5000
+  files: 12
+
+agreement:
+  sources: [reference, cohere, voxtral]
+  prefer: [reference, cohere, voxtral]
