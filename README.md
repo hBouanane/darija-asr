@@ -36,7 +36,7 @@ repo so nothing is lost when Colab disconnects.
 ## Setup (Colab terminal)
 
 ```bash
-git clone <this repo> && cd darija-asr
+git clone https://github.com/hBouanane/darija-asr.git && cd darija-asr
 export HF_TOKEN=...            # write access, for the gated model and hub_repo
 bash scripts/colab_setup.sh asr
 ```
