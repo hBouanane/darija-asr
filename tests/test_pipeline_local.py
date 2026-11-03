@@ -7,7 +7,7 @@ import soundfile as sf
 
 from darija_asr.agreement import compute_agreement
 from darija_asr.eval.run import evaluate
-from darija_asr.merge.run import build_labels
+from darija_asr.merge.run import _judged_ids, build_labels
 from darija_asr.store import Run, done_ids, write_part
 
 
@@ -51,6 +51,14 @@ def test_cpu_stages(tmp_path):
     labels = build_labels(cfg).set_index("id")
     assert set(labels.index) == {"a", "b"}
     assert labels.at["b", "method"] == "llm"
+    assert "max_cer" in labels and "cer_cohere_reference" in labels
+
+    # mode=all: every clip with a candidate goes to the judge; no accept shortcut.
+    cfg["merge"]["mode"] = "all"
+    assert _judged_ids(cfg, compute_agreement(cfg)) == {"a", "b", "c"}
+    assert set(build_labels(cfg)["id"]) == {"b"}
+    cfg["merge"]["mode"] = "disagreements"
+    build_labels(cfg)
 
     run.gold_dir.mkdir(parents=True)
     pd.DataFrame({"n": [0, 1], "id": ["a", "b"], "channel": ["ch1", "ch1"], "duration": [1, 1],

@@ -55,12 +55,13 @@ Run every command below as `uv run darija ...` (or `uv run python -m darija_asr 
 P="-c configs/gold.yaml --set run_name=pilot --set select.n=30"
 darija prepare    $P
 darija smoke      $P --model cohere -n 10    # read the output next to the reference
-darija smoke      $P --model voxtral -n 10   # fp16 on a T4: check it isn't garbage
+darija smoke      $P --model voxtral -n 10   # fp16 on a T4, batched by 8: check it isn't garbage
+darija smoke      $P --model voxtral -n 10 --set asr.models.voxtral.batch_size=1   # same clips unbatched: should match
 darija transcribe $P --model cohere
 darija transcribe $P --model voxtral
 darija agree      $P --set agreement.sources=[reference,cohere,voxtral]
 darija merge      $P --set agreement.sources=[reference,cohere,voxtral]
-#    -> read work/pilot/merge/*.parquet next to the candidates
+#    -> read work/pilot/merge/*.parquet next to the candidates; note the token totals it prints
 
 # Before choosing selection settings for a split:
 darija stats -c configs/extra_v1.yaml        # clips/channel, pesq, duration histogram
@@ -72,7 +73,7 @@ darija transcribe  -c configs/gold.yaml --model cohere
 darija transcribe  -c configs/gold.yaml --model voxtral
 darija transcribe  -c configs/gold.yaml --model moulsot     # after: uv sync --extra moulsot
 darija agree       -c configs/gold.yaml
-darija merge       -c configs/gold.yaml                     # mode: all -> every clip judged
+darija merge       -c configs/gold.yaml
 darija labels      -c configs/gold.yaml
 darija gold-export -c configs/gold.yaml                     # writes resources/gold_ids.txt
 #    -> open work/gold/gold/gold.csv, listen, fix gold_text, put x in `checked`
@@ -82,7 +83,7 @@ darija eval        -c configs/gold.yaml
 darija prepare    -c configs/calib.yaml
 darija transcribe -c configs/calib.yaml --model cohere
 darija transcribe -c configs/calib.yaml --model voxtral
-darija agree      -c configs/calib.yaml       # prints route shares + pairwise CER
+darija agree      -c configs/calib.yaml       # pairwise CER between sources
 darija merge      -c configs/calib.yaml --mode batch-submit
 darija merge      -c configs/calib.yaml --mode batch-collect   # rerun until all collected
 darija labels     -c configs/calib.yaml
@@ -117,9 +118,13 @@ Notes:
   be added with `merge.lexicon`.
 - **The judge can only choose, not invent.** It may respell a word, but cannot add words
   no candidate has. It can reject a clip. Candidates are shuffled and anonymized by default.
-- **Routing:** clips where every source agrees within `accept_cer` skip the LLM. Clips
-  where every pair disagrees beyond `drop_cer` are dropped. Tune both on calibration
-  results and check them against `eval`.
+- **Every clip goes to the judge** (`merge.mode: all`), so every label follows one
+  spelling convention, and the judge, not a CER threshold, decides what to reject.
+  Agreement between sources can't prove a transcript right, and with only two voters a
+  single hallucination would drop a good clip. `agree` still runs: its scores (`max_cer`,
+  `mean_cer`, pairwise `cer_*`/`wer_*`) are kept as columns in `labels.parquet` for
+  filtering training data later. `merge.mode: disagreements` brings back the cheaper
+  accept/drop routing (`accept_cer`, `drop_cer`).
 - **Gold first.** Gold clips come from the test split, so they are fair to every model
   including MoulSot.0.3. `resources/gold_ids.txt` excludes them from every other run and
   from training data.

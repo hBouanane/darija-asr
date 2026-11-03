@@ -32,12 +32,12 @@ asr:
     cohere:
       repo: CohereLabs/cohere-transcribe-arabic-07-2026
       language: ar
-      batch_size: 8
+      batch_size: 16
       max_new_tokens: 256
       dtype: auto           # auto = bf16 if the GPU supports it, else fp16 (T4)
     voxtral:
       repo: mistralai/Voxtral-Mini-4B-Realtime-Arabic
-      batch_size: 1
+      batch_size: 8           # one clip at a time ran at 0.7x real time on a T4
       dtype: auto
       generate_kwargs: {}
     moulsot:
@@ -50,11 +50,16 @@ agreement:
   sources: [reference, cohere, voxtral]
   # Text used for clips routed to `accept`, first available wins.
   prefer: [reference, cohere, voxtral]
+  # Routes only decide anything when merge.mode = disagreements. With mode = all
+  # the scores are kept as label columns (max_cer, mean_cer, ...) for filtering later.
   accept_cer: 0.05          # every pair within this CER  -> accept without LLM
   drop_cer: 0.60            # every pair beyond this CER  -> drop (unreliable clip)
 
 merge:
-  mode: disagreements       # disagreements = only route=llm; all = every non-dropped clip
+  # all = every clip with a candidate goes to the judge, so every label follows the
+  # style guide and the judge (not a CER threshold) decides what to reject.
+  # disagreements = only route=llm; accepted clips keep the `prefer` text unchanged.
+  mode: all
   model: claude-opus-5-5
   effort: medium
   max_tokens: 16000

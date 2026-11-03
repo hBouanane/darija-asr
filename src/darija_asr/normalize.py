@@ -22,7 +22,7 @@ _SPACES = re.compile(r"\s+")
 
 
 def normalize(text: str | None) -> str:
-    if not text:
+    if not isinstance(text, str) or not text:  # None, or NaN from a missing label
         return ""
     # NFKD splits hamza/madda carriers (أ إ آ ؤ ئ) and Latin accents into a base
     # letter plus a combining mark; dropping all marks (Mn) also drops tashkeel.
@@ -36,7 +36,7 @@ def normalize(text: str | None) -> str:
 
 def latin_ratio(text: str | None) -> float:
     """Share of letters in Latin script; shows code-switching / script mismatches."""
-    letters = [ch for ch in (text or "") if ch.isalpha()]
+    letters = [ch for ch in (text if isinstance(text, str) else "") if ch.isalpha()]
     if not letters:
         return 0.0
     return sum("LATIN" in unicodedata.name(ch, "") for ch in letters) / len(letters)

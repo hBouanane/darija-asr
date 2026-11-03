@@ -1,5 +1,5 @@
 # Gold set: clips from the held-out MoulSot test split. Run the whole pipeline on
-# it (all models + merge in `all` mode), then hand-correct gold/gold.csv.
+# it (all models + the judge), then hand-correct gold/gold.csv.
 # Every other run excludes these ids via resources/gold_ids.txt.
 extends: base.yaml
 run_name: gold
@@ -16,5 +16,3 @@ select:
 agreement:
   sources: [reference, cohere, voxtral, moulsot]
 
-merge:
-  mode: all

@@ -8,6 +8,11 @@ from ..audio import SAMPLE_RATE
 from .base import ASRBackend, resolve_dtype
 
 
+def clean(text: str) -> str:
+    """Drop the `#` markers the model emits around unclear stretches (`###أنا كنت#`)."""
+    return " ".join(text.replace("#", " ").split())
+
+
 class CohereBackend(ASRBackend):
     def __init__(self, cfg: dict):
         super().__init__(cfg)
@@ -29,7 +34,8 @@ class CohereBackend(ASRBackend):
         outputs = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens)
         texts = self.processor.decode(outputs, skip_special_tokens=True,
                                       audio_chunk_index=chunk_index, language=self.language)
-        return [texts] if isinstance(texts, str) else list(texts)
+        texts = [texts] if isinstance(texts, str) else list(texts)
+        return [clean(t) for t in texts]
 
     def transcribe(self, audios: list[np.ndarray]) -> list[str]:
         # The model card only documents single-clip calls. Try a batch, and fall

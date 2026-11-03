@@ -20,13 +20,23 @@ def _judge(cfg: dict) -> Judge:
     return Judge(mcfg, build_system_prompt(mcfg.get("style_guide"), mcfg.get("lexicon")))
 
 
+def _judged_ids(cfg: dict, agreement: pd.DataFrame) -> set[str]:
+    """Clips the judge should see, according to merge.mode."""
+    mode = cfg["merge"]["mode"]
+    if mode == "all":
+        # Every clip with at least one candidate, whatever its route.
+        return set(agreement.loc[agreement["n_sources"] >= 1, "id"])
+    if mode == "disagreements":
+        return set(agreement.loc[agreement["route"] == "llm", "id"])
+    raise SystemExit(f"merge.mode must be `all` or `disagreements`, got {mode!r}")
+
+
 def _pending(cfg: dict, run: Run, limit: int | None) -> pd.DataFrame:
     """Clips that need a judgement and don't have one yet, with their candidate texts."""
     if not run.agreement_path.exists():
         raise SystemExit("Run `darija agree` first.")
-    agreement = pd.read_parquet(run.agreement_path, columns=["id", "route"])
-    wanted = {"disagreements": {"llm"}, "all": {"llm", "accept"}}[cfg["merge"]["mode"]]
-    ids = set(agreement.loc[agreement["route"].isin(wanted), "id"])
+    agreement = pd.read_parquet(run.agreement_path, columns=["id", "route", "n_sources"])
+    ids = _judged_ids(cfg, agreement)
     ids -= done_ids(run.merge_dir)
     ids -= _ids_in_open_batches(run)
     sources = load_sources(run, cfg["agreement"]["sources"])
@@ -155,13 +165,15 @@ def _summary(run: Run) -> None:
 # -- Final labels ----------------------------------------------------------------
 
 def build_labels(cfg: dict) -> pd.DataFrame:
-    """id -> training text. LLM verdicts win; agreed clips use the preferred source."""
+    """id -> training text. LLM verdicts win. Only in `disagreements` mode do
+    accepted clips fall back to the preferred source's text."""
     run = Run(cfg)
     agreement = pd.read_parquet(run.agreement_path)
     sources = load_sources(run, cfg["agreement"]["sources"]).set_index("id")
     merged = latest_per_id(read_parts(run.merge_dir))
     merged = merged[merged["error"].isna()].set_index("id") if not merged.empty else merged
 
+    use_accept = cfg["merge"]["mode"] == "disagreements"
     prefer = cfg["agreement"]["prefer"]
     rows = []
     for rec in agreement.to_dict("records"):
@@ -171,18 +183,25 @@ def build_labels(cfg: dict) -> pd.DataFrame:
             if m["reject"] or not str(m["text"]).strip():
                 continue
             rows.append({"id": cid, "text": m["text"].strip(), "method": "llm", "confidence": m["confidence"]})
-        elif rec["route"] == "accept":
+        elif use_accept and rec["route"] == "accept":
             text = next((sources.at[cid, s] for s in prefer
                          if isinstance(sources.at[cid, s], str) and sources.at[cid, s].strip()), None)
             if text:
                 rows.append({"id": cid, "text": text.strip(), "method": "agree", "confidence": "high"})
-    labels = pd.DataFrame(rows).merge(agreement[["id", "channel", "duration", "route", "max_cer"]], on="id")
+    # Agreement scores travel with each label, for filtering training data later.
+    score_cols = ["id", "channel", "duration", "route", "n_sources"] + [
+        c for c in agreement.columns if c.startswith(("cer_", "wer_")) or c in ("max_cer", "min_cer", "mean_cer")]
+    labels = pd.DataFrame(rows).merge(agreement[score_cols], on="id")
     labels.to_parquet(run.labels_path, index=False)
     run.push("labels.parquet")
 
-    missing = (agreement["route"] == "llm").sum() - (labels["method"] == "llm").sum()
     print(f"{len(labels)} labelled clips ({labels['duration'].sum() / 3600:.1f} h) of {len(agreement)}; "
           f"by method: {labels['method'].value_counts().to_dict()}")
+    if not merged.empty:
+        rejected = int(merged["reject"].sum())
+        print(f"Rejected by the judge: {rejected}")
+    sent = len(_judged_ids(cfg, agreement))
+    missing = sent - len(merged)
     if missing > 0:
-        print(f"Note: {missing} clips routed to the LLM have no verdict yet (pending, errored or rejected).")
+        print(f"Note: {missing} clips sent to the judge have no verdict yet (pending or errored); rerun merge.")
     return labels
