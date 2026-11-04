@@ -1146,6 +1146,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "datasets" },
+    { name = "httpx" },
     { name = "huggingface-hub", version = "0.36.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-10-darija-asr-moulsot'" },
     { name = "huggingface-hub", version = "1.33.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-10-darija-asr-asr' or extra != 'extra-10-darija-asr-moulsot'" },
     { name = "jiwer" },
@@ -1197,6 +1198,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'asr'" },
     { name = "anthropic" },
     { name = "datasets", specifier = ">=3.0" },
+    { name = "httpx" },
     { name = "huggingface-hub", specifier = ">=0.30" },
     { name = "jiwer", specifier = ">=3.0" },
     { name = "librosa" },

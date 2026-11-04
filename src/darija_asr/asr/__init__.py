@@ -7,6 +7,8 @@ BACKENDS = {
     "voxtral": "darija_asr.asr.voxtral:VoxtralBackend",
     "moulsot": "darija_asr.asr.moulsot:MoulSotBackend",
     "voxtral:vllm": "darija_asr.asr.voxtral_vllm:VoxtralVllmBackend",
+    "moulsot:vllm": "darija_asr.asr.vllm_transcribe:VllmTranscribeBackend",
+    "cohere:vllm": "darija_asr.asr.vllm_transcribe:VllmTranscribeBackend",
 }
 
 

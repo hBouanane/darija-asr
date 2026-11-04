@@ -22,6 +22,7 @@ dependencies = [
     "anthropic",
     "tqdm",
     "websockets>=13",  # client for the vLLM Voxtral server
+    "httpx",           # client for vLLM transcription servers (MoulSot, Cohere)
 ]
 
 [project.optional-dependencies]

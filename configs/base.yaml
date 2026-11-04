@@ -47,9 +47,14 @@ asr:
     moulsot:
       repo: atlasia/moulsot.v0.3
       language: Arabic
-      batch_size: 16          # one clip at a time ran at ~2.3x real time on a T4
+      backend: transformers   # or vllm: a running `vllm serve atlasia/moulsot.v0.3` (README, "vLLM")
+      batch_size: 16          # transformers: ~2.3x real time unbatched, 5x at 16 on a T4
       max_new_tokens: 256
       dtype: auto
+      # vllm backend only. batch_size there = clips handed over per call (use ~128).
+      url: http://localhost:8000/v1
+      iso_language: ar
+      concurrency: 64
 
 agreement:
   # Which transcripts take part. `reference` = the dataset's Gemini text.

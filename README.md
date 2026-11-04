@@ -139,6 +139,21 @@ darija transcribe $P --model voxtral $V
 - `concurrency` (default 12) is how many clips are in flight; a T4's KV cache holds about a dozen clips.
   vLLM queues anything beyond that.
 
+### MoulSot (and Cohere) with vLLM
+
+vLLM serves Qwen3-ASR models, MoulSot included, on its OpenAI-style `/v1/audio/transcriptions`
+route. Same server environment as above; only one model fits on a T4 at a time.
+
+```bash
+pkill -f "vllm serve"
+nohup /content/vllm-env/bin/vllm serve atlasia/moulsot.v0.3 --dtype half --max-model-len 2048 --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
+while ! grep -q "Application startup complete" vllm.log; do pgrep -f "vllm serve" >/dev/null || { echo "server died"; tail -40 vllm.log; break; }; sleep 10; done; grep -q "Application startup complete" vllm.log && echo ready
+
+M="--set asr.models.moulsot.backend=vllm --set asr.models.moulsot.batch_size=128"
+darija smoke      $P --model moulsot -n 30 $M
+darija transcribe $P --model moulsot $M
+```
+
 ## Design choices
 
 - **Normalization is for scoring only** (`normalize.py`). It removes alef/hamza, ة/ه, ى/ي,
