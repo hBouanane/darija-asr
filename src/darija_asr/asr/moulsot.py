@@ -5,11 +5,7 @@ split); on 100-gt-2.5 train it would just echo its training labels.
 """
 from __future__ import annotations
 
-import os
-import tempfile
-
 import numpy as np
-import soundfile as sf
 
 from ..audio import SAMPLE_RATE
 from .base import ASRBackend
@@ -25,20 +21,14 @@ class MoulSotBackend(ASRBackend):
         if dtype == "auto":
             dtype = "bfloat16" if torch.cuda.is_bf16_supported() else "float16"
         self.language = cfg.get("language", "Arabic")
-        self.model = Qwen3ASRModel.from_pretrained(cfg["repo"], dtype=dtype, device_map="cuda")
+        self.model = Qwen3ASRModel.from_pretrained(
+            cfg["repo"], dtype=getattr(torch, dtype), device_map="cuda",
+            max_inference_batch_size=self.batch_size, max_new_tokens=int(cfg.get("max_new_tokens", 256)))
 
     def transcribe(self, audios: list[np.ndarray]) -> list[str]:
-        # The documented API takes a file path, so round-trip through a temp wav.
-        texts = []
-        for audio in audios:
-            fd, path = tempfile.mkstemp(suffix=".wav")
-            os.close(fd)
-            try:
-                sf.write(path, audio, SAMPLE_RATE)
-                result = self.model.transcribe(audio=path, language=self.language)
-                if isinstance(result, list):
-                    result = result[0]
-                texts.append(result.text)
-            finally:
-                os.remove(path)
-        return texts
+        # qwen_asr batches a list of (array, sample_rate) tuples itself.
+        results = self.model.transcribe(audio=[(a, SAMPLE_RATE) for a in audios],
+                                        language=[self.language] * len(audios))
+        if not isinstance(results, list):
+            results = [results]
+        return [r.text for r in results]

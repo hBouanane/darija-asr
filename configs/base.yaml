@@ -43,6 +43,8 @@ asr:
     moulsot:
       repo: atlasia/moulsot.v0.3
       language: Arabic
+      batch_size: 16          # one clip at a time ran at ~2.3x real time on a T4
+      max_new_tokens: 256
       dtype: auto
 
 agreement:

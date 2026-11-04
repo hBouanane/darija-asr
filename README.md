@@ -39,7 +39,9 @@ repo so nothing is lost when Colab disconnects.
 pip install uv
 git clone https://github.com/hBouanane/darija-asr.git && cd darija-asr
 uv sync --extra asr          # Cohere + Voxtral
-# uv sync --extra moulsot    # MoulSot.0.3 instead; it needs an older transformers, so the extras conflict
+# uv sync --extra moulsot    # MoulSot.0.3 instead; it needs an older transformers, so the extras conflict.
+#                            # Then run it with `uv run --extra moulsot darija ...`: a plain `uv run`
+#                            # re-syncs huggingface-hub to the default (newer) version and breaks it.
 # uv sync                    # no GPU stages: agree, merge, labels, eval
 export HF_TOKEN=...          # write access: gated Cohere model + hub_repo
 export ANTHROPIC_API_KEY=... # only for `merge`
@@ -71,7 +73,7 @@ darija prepare     -c configs/gold.yaml
 darija smoke       -c configs/gold.yaml --model cohere      # sanity-check output + speed first
 darija transcribe  -c configs/gold.yaml --model cohere
 darija transcribe  -c configs/gold.yaml --model voxtral
-darija transcribe  -c configs/gold.yaml --model moulsot     # after: uv sync --extra moulsot
+uv run --extra moulsot darija transcribe -c configs/gold.yaml --model moulsot
 darija agree       -c configs/gold.yaml
 darija merge       -c configs/gold.yaml
 darija labels      -c configs/gold.yaml
