@@ -37,9 +37,13 @@ asr:
       dtype: auto           # auto = bf16 if the GPU supports it, else fp16 (T4)
     voxtral:
       repo: mistralai/Voxtral-Mini-4B-Realtime-Arabic
-      batch_size: 8           # one clip at a time ran at 0.7x real time on a T4
+      backend: transformers   # or vllm: a running vLLM server (README, "Voxtral with vLLM")
+      batch_size: 8           # transformers: 0.7x real time unbatched, 1.4x at 8, 2.3x at 16 on a T4
       dtype: auto
       generate_kwargs: {}
+      # vllm backend only. batch_size there = clips handed over per call (use ~64).
+      url: ws://localhost:8000/v1/realtime
+      concurrency: 32         # websocket sessions open at once
     moulsot:
       repo: atlasia/moulsot.v0.3
       language: Arabic

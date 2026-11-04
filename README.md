@@ -109,6 +109,33 @@ Notes:
   Qwen3-ASR) on the same gold set.
 - The judge needs `ANTHROPIC_API_KEY`. Model and effort are in `merge:` in the config.
 
+## Voxtral with vLLM
+
+The transformers backend runs Voxtral Realtime at about 1.4-2.3x real time on a T4. vLLM
+batches every open clip together and replays each decoder step as a CUDA graph. The vLLM
+server lives in its own environment, so it never fights the project's transformers pin;
+the project only talks to it over a websocket.
+
+```bash
+# once per Colab VM: a separate environment for the server
+uv venv /content/vllm-env --python 3.12
+uv pip install --python /content/vllm-env/bin/python -U vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
+
+# start it in the background (T4: fp16, no bf16), then wait for "Application startup complete"
+VLLM_DISABLE_COMPILE_CACHE=1 nohup /content/vllm-env/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-Arabic   --tokenizer-mode mistral --dtype half --max-model-len 4096 --gpu-memory-utilization 0.85   --compilation_config '{"cudagraph_mode": "PIECEWISE"}' > vllm.log 2>&1 &
+tail -f vllm.log
+
+# use it: same model name, same output folder, other backend (plain `uv run`, no extra needed)
+V="--set asr.models.voxtral.backend=vllm --set asr.models.voxtral.batch_size=64"
+darija smoke      $P --model voxtral -n 16 $V
+darija transcribe $P --model voxtral $V
+```
+
+- If startup fails while compiling, replace the `--compilation_config ...` line with `--enforce-eager`
+  (no CUDA graphs, still continuous batching).
+- Only one model fits on a T4: stop the server (`pkill -f "vllm serve"`) before running Cohere or MoulSot.
+- `concurrency` (default 32) is how many clips are in flight; raise it while GPU memory allows.
+
 ## Design choices
 
 - **Normalization is for scoring only** (`normalize.py`). It removes alef/hamza, ة/ه, ى/ي,

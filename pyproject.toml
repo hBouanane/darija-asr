@@ -21,6 +21,7 @@ dependencies = [
     "tabulate",
     "anthropic",
     "tqdm",
+    "websockets>=13",  # client for the vLLM Voxtral server
 ]
 
 [project.optional-dependencies]
