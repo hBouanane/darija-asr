@@ -146,7 +146,10 @@ route. Same server environment as above; only one model fits on a T4 at a time.
 
 ```bash
 pkill -f "vllm serve"
-nohup /content/vllm-env/bin/vllm serve atlasia/moulsot.v0.3 --dtype half --max-model-len 2048 --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
+# the Hub repo ships one model.safetensors plus a stale 2-shard index that vLLM trusts: drop the index
+/content/vllm-env/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('atlasia/moulsot.v0.3', local_dir='/content/moulsot', ignore_patterns=['*.pth', 'trainer_state.json'])"
+rm -f /content/moulsot/model.safetensors.index.json
+nohup /content/vllm-env/bin/vllm serve /content/moulsot --served-model-name atlasia/moulsot.v0.3 --dtype half --max-model-len 2048 --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
 while ! grep -q "Application startup complete" vllm.log; do pgrep -f "vllm serve" >/dev/null || { echo "server died"; tail -40 vllm.log; break; }; sleep 10; done; grep -q "Application startup complete" vllm.log && echo ready
 
 M="--set asr.models.moulsot.backend=vllm --set asr.models.moulsot.batch_size=128"

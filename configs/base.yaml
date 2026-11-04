@@ -47,7 +47,7 @@ asr:
     moulsot:
       repo: atlasia/moulsot.v0.3
       language: Arabic
-      backend: transformers   # or vllm: a running `vllm serve atlasia/moulsot.v0.3` (README, "vLLM")
+      backend: transformers   # or vllm (README, "vLLM"): 44.8x real time on a T4 vs 5x here
       batch_size: 16          # transformers: ~2.3x real time unbatched, 5x at 16 on a T4
       max_new_tokens: 256
       dtype: auto
