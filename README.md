@@ -157,6 +157,15 @@ darija smoke      $P --model moulsot -n 30 $M
 darija transcribe $P --model moulsot $M
 ```
 
+Cohere the same way (gated model: `HF_TOKEN` must be set in the shell that starts the server):
+
+```bash
+pkill -f "vllm serve"
+nohup /content/vllm-env/bin/vllm serve CohereLabs/cohere-transcribe-arabic-07-2026 --dtype half --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
+C="--set asr.models.cohere.backend=vllm --set asr.models.cohere.batch_size=128"
+darija smoke $P --model cohere -n 30 $C
+```
+
 ## Design choices
 
 - **Normalization is for scoring only** (`normalize.py`). It removes alef/hamza, ة/ه, ى/ي,

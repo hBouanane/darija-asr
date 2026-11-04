@@ -55,7 +55,8 @@ class VllmTranscribeBackend(ASRBackend):
             for i, res in enumerate(results):  # one retry per failed clip
                 if isinstance(res, BaseException):
                     results[i] = await self._one(client, audios[i], sem)
-        return [r.strip() for r in results]
+        # "#" never belongs in a transcript; Cohere wraps unclear stretches in it.
+        return [" ".join(r.replace("#", " ").split()) for r in results]
 
     def transcribe(self, audios: list[np.ndarray]) -> list[str]:
         return asyncio.run(self._all(audios))
