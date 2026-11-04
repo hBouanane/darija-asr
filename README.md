@@ -161,7 +161,9 @@ Cohere the same way (gated model: `HF_TOKEN` must be set in the shell that start
 
 ```bash
 pkill -f "vllm serve"
-nohup /content/vllm-env/bin/vllm serve CohereLabs/cohere-transcribe-arabic-07-2026 --dtype half --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
+# fp16 crashes ("expected scalar type Float but found Half"): use float32 on a T4, bfloat16 on newer GPUs.
+# On a T4 this gives 14.3x, slower than the transformers backend (20.6x), so keep transformers there.
+nohup /content/vllm-env/bin/vllm serve CohereLabs/cohere-transcribe-arabic-07-2026 --dtype float32 --gpu-memory-utilization 0.9 > vllm.log 2>&1 &
 C="--set asr.models.cohere.backend=vllm --set asr.models.cohere.batch_size=128"
 darija smoke $P --model cohere -n 30 $C
 ```
