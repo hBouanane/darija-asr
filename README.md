@@ -122,8 +122,8 @@ uv venv /content/vllm-env --python 3.12
 uv pip install --python /content/vllm-env/bin/python -U vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
 
 # start it in the background (T4: fp16, no bf16), then wait for "Application startup complete"
-VLLM_DISABLE_COMPILE_CACHE=1 nohup /content/vllm-env/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-Arabic   --tokenizer-mode mistral --dtype half --max-model-len 4096 --gpu-memory-utilization 0.85   --compilation_config '{"cudagraph_mode": "PIECEWISE"}' > vllm.log 2>&1 &
-tail -f vllm.log
+VLLM_DISABLE_COMPILE_CACHE=1 nohup /content/vllm-env/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-Arabic --tokenizer-mode mistral --dtype half --max-model-len 1024 --gpu-memory-utilization 0.92 --compilation_config '{"cudagraph_mode": "PIECEWISE"}' > vllm.log 2>&1 &
+while ! grep -q "Application startup complete" vllm.log; do pgrep -f "vllm serve" >/dev/null || { echo "server died"; tail -40 vllm.log; exit 1; }; sleep 10; done && echo ready
 
 # use it: same model name, same output folder, other backend (plain `uv run`, no extra needed)
 V="--set asr.models.voxtral.backend=vllm --set asr.models.voxtral.batch_size=64"
@@ -134,7 +134,10 @@ darija transcribe $P --model voxtral $V
 - If startup fails while compiling, replace the `--compilation_config ...` line with `--enforce-eager`
   (no CUDA graphs, still continuous batching).
 - Only one model fits on a T4: stop the server (`pkill -f "vllm serve"`) before running Cohere or MoulSot.
-- `concurrency` (default 32) is how many clips are in flight; raise it while GPU memory allows.
+- `--max-model-len 1024` covers a 15 s clip (one step per 80 ms of audio, plus the prompt). On a T4 the
+  weights leave ~3.4 GB of KV cache, about 1 MB per step, so a much longer limit fails at startup.
+- `concurrency` (default 12) is how many clips are in flight; a T4's KV cache holds about a dozen clips.
+  vLLM queues anything beyond that.
 
 ## Design choices
 

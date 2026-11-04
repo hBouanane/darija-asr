@@ -25,7 +25,7 @@ class VoxtralVllmBackend(ASRBackend):
         super().__init__(cfg)
         self.url = cfg.get("url", "ws://localhost:8000/v1/realtime")
         self.model = cfg["repo"]
-        self.concurrency = int(cfg.get("concurrency", 32))
+        self.concurrency = int(cfg.get("concurrency", 12))
         self.timeout = float(cfg.get("timeout", 120))
         try:
             asyncio.run(self._ping())
