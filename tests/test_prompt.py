@@ -25,3 +25,12 @@ def test_custom_id_is_valid_for_batches():
 
     cid = custom_id("@eruine4218_23_655")
     assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", cid)
+
+
+def test_batch_message_wraps_each_clip():
+    from darija_asr.merge.prompt import build_batch_user_message, build_system_prompt
+
+    msg = build_batch_user_message([("c1", {"a": "x"}), ("c2", {"a": "y", "b": "z"})])
+    assert msg.count("<clip id=") == 2 and '<clip id="c2">' in msg
+    assert "JSON array" in build_system_prompt(None, batch=True)
+    assert "JSON array" not in build_system_prompt(None)

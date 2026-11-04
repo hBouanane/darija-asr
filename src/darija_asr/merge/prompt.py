@@ -45,8 +45,20 @@ OUTPUT_SCHEMA = {
 }
 
 
-def build_system_prompt(style_guide_path: str | None, lexicon_path: str | None = None) -> str:
+BATCH_INSTRUCTIONS = """\
+This request contains several clips, each in its own <clip id="..."> block with its own candidates. \
+Handle every clip independently, exactly as described above: never carry words, names or context \
+from one clip into another, even when clips look related.
+
+Return a JSON array with one object per clip, in the same order as the clips, each with "id" (copied \
+from the clip block), "text", "reject", "confidence" and "notes". Return only the JSON array."""
+
+
+def build_system_prompt(style_guide_path: str | None, lexicon_path: str | None = None,
+                        batch: bool = False) -> str:
     parts = [INSTRUCTIONS]
+    if batch:
+        parts.append(BATCH_INSTRUCTIONS)
     if style_guide_path:
         parts.append("<style_guide>\n" + Path(style_guide_path).read_text(encoding="utf-8").strip()
                      + "\n</style_guide>")
@@ -67,3 +79,9 @@ def build_user_message(clip_id: str, candidates: dict[str, str], reveal_sources:
         label = source if reveal_sources else chr(ord("A") + i)
         blocks.append(f'<candidate id="{label}">\n{text}\n</candidate>')
     return "\n".join(blocks)
+
+
+def build_batch_user_message(clips: list[tuple[str, dict[str, str]]], reveal_sources: bool = False) -> str:
+    """clips: (clip_id, candidates) pairs -> one message holding every clip."""
+    return "\n\n".join(f'<clip id="{cid}">\n{build_user_message(cid, cands, reveal_sources)}\n</clip>'
+                       for cid, cands in clips)
