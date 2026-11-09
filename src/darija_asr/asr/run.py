@@ -24,6 +24,10 @@ def in_shard(clip_id: str, shard: int, num_shards: int) -> bool:
 def transcribe(cfg: dict, model: str, shard: int = 0, num_shards: int = 1, limit: int | None = None) -> None:
     run = Run(cfg)
     out_dir = run.asr_dir(model)
+    # With hub_repo set, start from the shared state: clips added by `prepare --add`
+    # elsewhere, and this model's parts written by other machines/sessions.
+    run.pull("workset", quiet=True)
+    run.pull(f"asr/{model}", quiet=True)
     meta = read_workset(run, with_audio=False)
     finished = done_ids(out_dir)
     todo = meta[~meta["id"].isin(finished)]
@@ -41,11 +45,14 @@ def transcribe(cfg: dict, model: str, shard: int = 0, num_shards: int = 1, limit
     rows: list[dict] = []
     audio_seconds = compute_seconds = 0.0
 
+    unpushed: list = []  # parts whose upload failed go up with the next one
+
     def flush():
         nonlocal rows
         if rows:
-            write_part(pd.DataFrame(rows), out_dir)
-            run.push(f"asr/{model}", f"{model}: +{len(rows)}")
+            unpushed.append(write_part(pd.DataFrame(rows), out_dir))
+            if run.push_files(unpushed, f"{model}: +{len(rows)} (shard {shard}/{num_shards})"):
+                unpushed.clear()
             rows = []
 
     pbar = tqdm(total=len(todo_ids), desc=model)

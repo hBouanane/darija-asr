@@ -21,93 +21,49 @@ gold run ─► gold-export ─► hand-correct gold.csv ───────�
 
 ## Runs
 
-Each YAML in `configs/` is a run: which clips, which sources, which thresholds.
-Outputs go to `work/<run_name>/` and, if `hub_repo` is set, to a private HF dataset
-repo so nothing is lost when Colab disconnects.
+Each YAML in `configs/` is a run: which clips, which sources, which judge. Outputs go to
+`work/<run_name>/` and to a private HF dataset repo (`hub_repo`, or the `DARIJA_HUB_REPO`
+environment variable), which is how Colab, Kaggle and a judge machine share one run.
 
-| config | clips | purpose |
+| config | clips | sources |
 |---|---|---|
-| `gold.yaml` | 400 from `100-gt-2.5` **test** | Hand-corrected gold set. Never trained on. |
-| `calib.yaml` | 5,000 from `100-gt-2.5` train | Iteration 1: 3 sources, tune thresholds and prompt. |
-| `extra_v1.yaml` | 30,000 from `extra-gt-2.5` | Iteration 2: new clips, ASR models only. |
+| `gold.yaml` | 300 from `100-gt-2.5` **test** | reference, cohere, voxtral, moulsot. Hand-corrected; never trained on. |
+| `gt100.yaml` | 5,000 from `100-gt-2.5` train | reference, cohere, voxtral (MoulSot trained on these clips) |
+| `extra.yaml` | 10,000 from `extra-gt-2.5` | cohere, voxtral, moulsot |
 
-`extra-lt-2.5` (perceptual quality score PESQ < 2.5, i.e. noisy audio) is not used yet.
+`extra-lt-2.5` (perceptual quality score PESQ < 2.5, i.e. noisy audio) is not used.
 
-## Setup (Colab terminal)
+**Full step-by-step commands (Voxtral on Kaggle, Cohere + MoulSot on Colab, judge, gold):
+[docs/run_guide.md](docs/run_guide.md).**
 
-```bash
-pip install uv
-git clone https://github.com/hBouanane/darija-asr.git && cd darija-asr
-uv sync --extra asr          # Cohere + Voxtral
-# uv sync --extra moulsot    # MoulSot.0.3 instead; it needs an older transformers, so the extras conflict.
-#                            # Then run it with `uv run --extra moulsot darija ...`: a plain `uv run`
-#                            # re-syncs huggingface-hub to the default (newer) version and breaks it.
-# uv sync                    # no GPU stages: agree, merge, labels, eval
-export HF_TOKEN=...          # write access: gated Cohere model + hub_repo
-export ANTHROPIC_API_KEY=... # only for `merge`
-```
+## Commands
 
-Set `hub_repo` in `configs/base.yaml` (e.g. `your-username/darija-asr-work`).
-Run every command below as `uv run darija ...` (or `uv run python -m darija_asr ...`) from the repo root.
+Run every command as `uv run darija <command> -c configs/<run>.yaml` from the repo root.
 
-## Workflow
-
-```bash
-# 0. Pilot: 30 clips, check each model's output, speed, and the judge, before anything big
-P="-c configs/gold.yaml --set run_name=pilot --set select.n=30"
-darija prepare    $P
-darija smoke      $P --model cohere -n 10    # read the output next to the reference
-darija smoke      $P --model voxtral -n 10   # fp16 on a T4, batched by 8: check it isn't garbage
-darija smoke      $P --model voxtral -n 10 --set asr.models.voxtral.batch_size=1   # same clips unbatched: should match
-darija transcribe $P --model cohere
-darija transcribe $P --model voxtral
-darija agree      $P --set agreement.sources=[reference,cohere,voxtral]
-darija merge      $P --set agreement.sources=[reference,cohere,voxtral]
-#    -> read work/pilot/merge/*.parquet next to the candidates; note the token totals it prints
-
-# Before choosing selection settings for a split:
-darija stats -c configs/extra_v1.yaml        # clips/channel, pesq, duration histogram
-
-# 1. Gold set: sample, transcribe with every model, judge everything, export for correction
-darija prepare     -c configs/gold.yaml
-darija smoke       -c configs/gold.yaml --model cohere      # sanity-check output + speed first
-darija transcribe  -c configs/gold.yaml --model cohere
-darija transcribe  -c configs/gold.yaml --model voxtral
-uv run --extra moulsot darija transcribe -c configs/gold.yaml --model moulsot
-darija agree       -c configs/gold.yaml
-darija merge       -c configs/gold.yaml
-darija labels      -c configs/gold.yaml
-darija gold-export -c configs/gold.yaml                     # writes resources/gold_ids.txt
-#    -> open work/gold/gold/gold.csv, listen, fix gold_text, put x in `checked`
-darija eval        -c configs/gold.yaml
-
-# 2. Calibration (iteration 1)
-darija prepare    -c configs/calib.yaml
-darija transcribe -c configs/calib.yaml --model cohere
-darija transcribe -c configs/calib.yaml --model voxtral
-darija agree      -c configs/calib.yaml       # pairwise CER between sources
-darija merge      -c configs/calib.yaml --mode batch-submit
-darija merge      -c configs/calib.yaml --mode batch-collect   # rerun until all collected
-darija labels     -c configs/calib.yaml
-
-# 3. extra-gt-2.5 (iteration 2): same commands with configs/extra_v1.yaml
-
-# 4. Training data
-darija build-train -c configs/calib.yaml -c configs/extra_v1.yaml --out your-username/darija-train --push
-```
+| command | what it does |
+|---|---|
+| `stats` | clips per channel, PESQ and duration distributions of the source split |
+| `prepare` | pick `select.n` clips (or `select.hours`); `--add` grows an existing run with new clips |
+| `smoke --model M -n 10` | transcribe a few clips and print them next to the reference (nothing saved) |
+| `transcribe --model M` | resumable; pulls shared state first, saves a part every `flush_every` clips |
+| `agree` | pairwise CER between sources (kept as label columns) |
+| `merge` | the LLM judge, one clip per request; resumable; waits for clips missing a source |
+| `labels` | final text per clip -> `labels.parquet` |
+| `gold-export`, `eval` | export the gold set for hand correction; score every system against it |
+| `build-train -c A -c B --out repo --push` | join labels + audio into a training dataset |
+| `push`, `pull` | upload / download a run (or `--path` inside it) |
 
 Notes:
 - Any config value can be overridden on the command line: `--set select.n=30 --set select.duration=[2,20]`.
 - Selection (`select:`): `n` clips and/or `hours` of audio, `duration` range in seconds (default 3-15,
-  measured on the audio itself), `pesq_min`, `max_per_channel`. Clips are taken row group by row group,
-  round-robin across channels, so a run covers as many channels as possible.
-- Every stage is resumable. `transcribe` skips finished ids. Split a run across sessions
-  with `--shard i --num-shards n`. On a fresh VM, `darija pull -c <config>` restores the run.
-- `merge --mode sync` gives fast feedback on small runs. Batch mode costs 50% less and
-  finishes within about an hour.
+  measured on the audio itself), `pesq_min`, `max_per_channel` (counted over the whole run, across
+  every `--add`). Clips are taken row group by row group, round-robin across channels.
+- The judge (`merge:`) defaults to Gemini through its OpenAI-compatible API (`GEMINI_API_KEY`).
+  `provider: openai` also covers any `vllm serve` model (e.g. Gemma); `provider: anthropic` is Claude.
+- Voxtral and MoulSot default to `backend: vllm` (a running vLLM server, see below); set
+  `--set asr.models.<model>.backend=transformers` to run them without one. Cohere uses transformers.
 - `darija eval --hyp qwen=preds.parquet` scores any other model (e.g. your fine-tuned
   Qwen3-ASR) on the same gold set.
-- The judge needs `ANTHROPIC_API_KEY`. Model and effort are in `merge:` in the config.
 
 ## Voxtral with vLLM
 

@@ -1,0 +1,17 @@
+# The clips MoulSot was trained on (100-gt-2.5 train): Gemini reference + Cohere +
+# Voxtral. MoulSot is left out on purpose: on its own training clips it mostly
+# repeats the Gemini reference, which would count one opinion twice.
+# Grow it any time: darija prepare -c configs/gt100.yaml --add --set select.n=5000
+extends: base.yaml
+run_name: gt100
+
+source:
+  config: 100-gt-2.5
+  split: train
+
+select:
+  n: 5000
+
+agreement:
+  sources: [reference, cohere, voxtral]
+  prefer: [reference, cohere, voxtral]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 
 import yaml
@@ -40,4 +41,8 @@ def load_config(path: str | Path) -> dict:
         cfg = _deep_merge(load_config(path.parent / parent), cfg)
     if "run_name" not in cfg and parent is not None:
         raise ValueError(f"{path}: run configs must set run_name")
+    if parent is None and not cfg.get("hub_repo") and os.environ.get("DARIJA_HUB_REPO"):
+        # Set once per machine (`export DARIJA_HUB_REPO=user/darija-asr-work`) instead
+        # of on every command; every machine then reads and writes the same runs.
+        cfg["hub_repo"] = os.environ["DARIJA_HUB_REPO"]
     return cfg

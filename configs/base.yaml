@@ -4,8 +4,9 @@
 # hub_repo for persistence, since the VM is wiped on disconnect.
 workdir: work
 
-# Private HF dataset repo used to persist every stage's output across Colab
-# sessions, e.g. "your-username/darija-asr-work". null = local only.
+# Private HF dataset repo that every machine reads and writes (Colab, Kaggle, RunPod),
+# e.g. "your-username/darija-asr-work". null = local only, or taken from the
+# DARIJA_HUB_REPO environment variable.
 hub_repo: null
 
 source:
@@ -21,13 +22,14 @@ select:
   pesq_min: 2.5             # perceptual quality floor (all *-gt-2.5 clips already pass 2.5)
   max_per_channel: 200      # caps over-represented YouTube channels
   files: null               # parquet files to sample from (null = all)
-  shard_size: 500           # clips per working-set parquet shard
+  shard_size: 1000          # clips per working-set parquet shard (one hub commit each)
   seed: 13
   exclude_ids:              # files with one id per line, never selected (gold set)
     - resources/gold_ids.txt
 
 asr:
-  flush_every: 200          # write a parquet part (and push to hub) every N clips
+  flush_every: 1000         # write a parquet part (and push to hub) every N clips; the hub limits
+                            # commits per hour, and fast vLLM models finish 200 clips in ~30 s
   models:
     cohere:
       repo: CohereLabs/cohere-transcribe-arabic-07-2026
@@ -37,18 +39,18 @@ asr:
       dtype: auto           # auto = bf16 if the GPU supports it, else fp16 (T4)
     voxtral:
       repo: mistralai/Voxtral-Mini-4B-Realtime-Arabic
-      backend: transformers   # or vllm: a running vLLM server (README, "Voxtral with vLLM")
-      batch_size: 8           # transformers: 0.7x real time unbatched, 1.4x at 8, 2.3x at 16 on a T4
+      backend: vllm           # needs a running vLLM server (docs/run_guide.md); or transformers
+      batch_size: 64          # vllm: clips per call. transformers: 16 (2.3x on a T4, vs 3.9x on vLLM)
       dtype: auto
       generate_kwargs: {}
       # vllm backend only. batch_size there = clips handed over per call (use ~64).
       url: ws://localhost:8000/v1/realtime
-      concurrency: 12         # websocket sessions open at once (a T4 fits ~12 clips of KV cache)
+      concurrency: 12         # sessions in flight; a T4 fits ~12 clips of KV cache (24 for 2 GPUs)
     moulsot:
       repo: atlasia/moulsot.v0.3
       language: Arabic
-      backend: transformers   # or vllm (README, "vLLM"): 44.8x real time on a T4 vs 5x here
-      batch_size: 16          # transformers: ~2.3x real time unbatched, 5x at 16 on a T4
+      backend: vllm           # 44.8x real time on a T4 (transformers: 5x at batch 16)
+      batch_size: 128         # vllm: clips per call. transformers: 16
       max_new_tokens: 256
       dtype: auto
       # vllm backend only. batch_size there = clips handed over per call (use ~128).
@@ -71,10 +73,20 @@ merge:
   # style guide and the judge (not a CER threshold) decides what to reject.
   # disagreements = only route=llm; accepted clips keep the `prefer` text unchanged.
   mode: all
-  model: claude-opus-5-5
-  effort: medium
-  max_tokens: 16000
-  workers: 8                # parallel requests in sync mode
+  require_all_sources: true # judge a clip only once every source has transcribed it
+  # provider: openai = any OpenAI-compatible chat API (sync only):
+  #   Gemini:  base_url https://generativelanguage.googleapis.com/v1beta/openai, api_key_env GEMINI_API_KEY
+  #   Gemma on RunPod/vLLM: base_url http://<pod>:8000/v1, api_key_env null, model google/gemma-4-31b-it,
+  #     extra_body {chat_template_kwargs: {enable_thinking: false}}
+  # provider: anthropic = Claude (sync, or batch at half price).
+  provider: openai
+  base_url: https://generativelanguage.googleapis.com/v1beta/openai
+  api_key_env: GEMINI_API_KEY
+  model: gemini-2.5-pro
+  extra_body: {}
+  effort: medium            # anthropic only
+  max_tokens: 8192          # includes thinking tokens on thinking models
+  workers: 16               # requests in flight; raise to 64-128 for a vLLM server
   reveal_sources: false     # true = tell the LLM which system produced each candidate
   style_guide: resources/style_guide.md
   lexicon: null             # optional TSV (e.g. built from DODa): columns word, note

@@ -15,9 +15,21 @@ from .prompt import build_system_prompt, build_user_message
 BATCH_CHUNK = 20000  # requests per Message Batch (API limits: 100k requests / 256 MB)
 
 
-def _judge(cfg: dict) -> Judge:
+def _judge(cfg: dict):
+    """merge.provider: anthropic (Claude, sync or batch) or openai (any OpenAI-compatible
+    endpoint: Gemini's, or Gemma/Qwen/... behind `vllm serve`; sync only)."""
     mcfg = cfg["merge"]
-    return Judge(mcfg, build_system_prompt(mcfg.get("style_guide"), mcfg.get("lexicon")))
+    system = build_system_prompt(mcfg.get("style_guide"), mcfg.get("lexicon"))
+    if mcfg.get("provider", "anthropic") == "openai":
+        from .judge_openai import OpenAIJudge
+
+        return OpenAIJudge(mcfg, system)
+    return Judge(mcfg, system)
+
+
+def _require_anthropic(cfg: dict) -> None:
+    if cfg["merge"].get("provider", "anthropic") != "anthropic":
+        raise SystemExit("Batch mode is Claude-only; use `merge --mode sync` with merge.provider=openai.")
 
 
 def _judged_ids(cfg: dict, agreement: pd.DataFrame) -> set[str]:
@@ -39,8 +51,17 @@ def _pending(cfg: dict, run: Run, limit: int | None) -> pd.DataFrame:
     ids = _judged_ids(cfg, agreement)
     ids -= done_ids(run.merge_dir)
     ids -= _ids_in_open_batches(run)
-    sources = load_sources(run, cfg["agreement"]["sources"])
+    srcs = cfg["agreement"]["sources"]
+    sources = load_sources(run, srcs)
     todo = sources[sources["id"].isin(ids)]
+    if cfg["merge"].get("require_all_sources", True):
+        # A clip judged before every model has transcribed it would keep a weaker
+        # verdict forever (done ids are skipped), so wait for all candidates.
+        present = todo[srcs].apply(lambda col: col.fillna("").astype(str).str.strip() != "")
+        waiting = int((~present.all(axis=1)).sum())
+        if waiting:
+            print(f"{waiting} clips wait for missing transcripts ({', '.join(srcs)}); rerun merge when done")
+        todo = todo[present.all(axis=1)]
     return todo.head(limit) if limit else todo
 
 
@@ -53,22 +74,26 @@ def _messages(cfg: dict, todo: pd.DataFrame) -> list[tuple[str, str]]:
 
 def merge_sync(cfg: dict, limit: int | None = None) -> None:
     run = Run(cfg)
+    run.pull("merge", quiet=True)  # verdicts written elsewhere count as done
     todo = _pending(cfg, run, limit)
     print(f"{len(todo)} clips to judge with {cfg['merge']['model']}")
     if todo.empty:
         return
     judge = _judge(cfg)
     rows: list[dict] = []
+    unpushed: list = []  # parts whose upload failed go up with the next one
     with ThreadPoolExecutor(max_workers=int(cfg["merge"].get("workers", 8))) as pool:
         futures = {pool.submit(judge.call, msg): cid for cid, msg in _messages(cfg, todo)}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="judge"):
             rows.append({"id": futures[fut], **fut.result()})
-            if len(rows) >= 200:
-                write_part(pd.DataFrame(rows), run.merge_dir)
+            if len(rows) >= 500:
+                unpushed.append(write_part(pd.DataFrame(rows), run.merge_dir))
+                if run.push_files(unpushed, f"merge +{len(rows)}"):
+                    unpushed.clear()
                 rows = []
     if rows:
-        write_part(pd.DataFrame(rows), run.merge_dir)
-    run.push("merge")
+        unpushed.append(write_part(pd.DataFrame(rows), run.merge_dir))
+    run.push_files(unpushed, "merge: last parts")
     _summary(run)
 
 
@@ -96,6 +121,7 @@ def batch_submit(cfg: dict, limit: int | None = None) -> None:
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
+    _require_anthropic(cfg)
     run = Run(cfg)
     todo = _pending(cfg, run, limit)
     print(f"{len(todo)} clips to submit")
@@ -118,6 +144,7 @@ def batch_submit(cfg: dict, limit: int | None = None) -> None:
 
 
 def batch_collect(cfg: dict) -> None:
+    _require_anthropic(cfg)
     run = Run(cfg)
     batches = _load_batches(run)
     judge = _judge(cfg)

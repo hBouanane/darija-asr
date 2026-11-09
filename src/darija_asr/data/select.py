@@ -12,6 +12,7 @@ until the target number of clips (or hours) is reached.
 from __future__ import annotations
 
 import random
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -21,7 +22,7 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from .. import audio as audio_utils
-from ..store import Run, read_ids_file
+from ..store import WORKSET_META, Run, read_ids_file, read_workset
 
 META_COLUMNS = ["id", "channel", "pesq_hyp", "duration", "text"]
 DEFAULT_DURATION = (3.0, 15.0)
@@ -90,18 +91,40 @@ def visit_order(rows: pd.DataFrame, seed: int) -> list[tuple[str, int]]:
     return order
 
 
-def prepare(cfg: dict, force: bool = False) -> None:
+def _existing(run: Run) -> pd.DataFrame:
+    """Clips already in the run (local files, after pulling the hub's index)."""
+    run.pull(patterns=["workset/index-*.parquet"], quiet=True)
+    if not any(run.workset_dir.glob("index-*.parquet")) and not any(run.workset_dir.glob("shard-*.parquet")):
+        return pd.DataFrame(columns=["id", "channel", "duration"])
+    return read_workset(run, with_audio=False)
+
+
+def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
+    """Sample clips into the run's working set.
+
+    add=True grows an existing run by `select.n` clips (or `select.hours`) that are
+    not in it yet; the per-channel cap counts the clips already there. Every batch
+    gets its own tag, so its shard/index files never collide with earlier ones.
+    Run prepare from one machine at a time: two concurrent `--add`s could pick the
+    same clips.
+    """
     from huggingface_hub import HfFileSystem
 
     run = Run(cfg)
-    if any(run.workset_dir.glob("shard-*.parquet")) and not force:
-        raise SystemExit(f"{run.workset_dir} already has shards; pass --force to rebuild it.")
-    for old in run.workset_dir.glob("shard-*.parquet"):
-        old.unlink()
+    existing = _existing(run)
+    if len(existing) and not add:
+        if not force:
+            raise SystemExit(f"{run.name} already has {len(existing)} clips. Use `prepare --add` to add more, "
+                             "or --force to rebuild (local files only).")
+        if cfg.get("hub_repo"):
+            raise SystemExit("--force cannot remove the copies on hub_repo; use a new run_name instead.")
+        for old in [*run.workset_dir.glob("shard-*.parquet"), *run.workset_dir.glob("index-*.parquet")]:
+            old.unlink()
+        existing = existing.iloc[0:0]
 
     src, sel = cfg["source"], cfg["select"]
     has_reference = src.get("has_reference", True)
-    exclude: set[str] = set()
+    exclude: set[str] = set(existing["id"])
     for p in sel.get("exclude_ids") or []:
         exclude |= read_ids_file(p)
     lo, hi = duration_range(sel)
@@ -116,22 +139,35 @@ def prepare(cfg: dict, force: bool = False) -> None:
     if sel.get("files"):
         files = files[: sel["files"]]
     print(f"{src['dataset']}/{src['config']}/{src['split']}: {len(files)} files; "
-          f"duration {lo}-{hi}s, pesq >= {sel.get('pesq_min')}, max {cap} per channel")
+          f"duration {lo}-{hi}s, pesq >= {sel.get('pesq_min')}, max {cap} per channel; "
+          f"{len(existing)} clips already in {run.name}")
 
     fs = HfFileSystem()
     rows = eligible(read_metadata(fs, files), sel, has_reference, exclude)
-    print(f"{len(rows)} clips pass the metadata filters, from {rows['channel'].nunique()} channels")
+    print(f"{len(rows)} new clips pass the metadata filters, from {rows['channel'].nunique()} channels")
 
     run.workset_dir.mkdir(parents=True, exist_ok=True)
-    per_channel: dict[str, int] = defaultdict(int)
+    per_channel: dict[str, int] = defaultdict(int, existing["channel"].value_counts().to_dict())
+    tag = time.strftime("%Y%m%d-%H%M%S")
     buffer: list[dict] = []
     kept = shard = 0
     seconds = 0.0
-    rng = np.random.default_rng(sel["seed"])
+    rng = np.random.default_rng(sel["seed"] + len(existing))
     pbar = tqdm(total=max_clips or int(max_seconds), desc="clips" if max_clips else "seconds")
 
     def done() -> bool:
         return (max_clips and kept >= max_clips) or (max_seconds and seconds >= max_seconds)
+
+    def write_shard() -> None:
+        nonlocal shard, buffer
+        df = pd.DataFrame(buffer)
+        shard_path = run.workset_dir / f"shard-{tag}-{shard:05d}.parquet"
+        index_path = run.workset_dir / f"index-{tag}-{shard:05d}.parquet"
+        df.to_parquet(shard_path, index=False)
+        df[WORKSET_META].to_parquet(index_path, index=False)
+        run.push_files([shard_path, index_path], f"{run.name}: workset +{len(df)} clips")
+        shard += 1
+        buffer = []
 
     groups = {key: g for key, g in rows.groupby(["_file", "_rg"])}
     for path, rg in visit_order(rows, sel["seed"]):
@@ -165,16 +201,13 @@ def prepare(cfg: dict, force: bool = False) -> None:
             seconds += dur
             pbar.update(1 if max_clips else int(dur))
             if len(buffer) >= sel["shard_size"]:
-                pd.DataFrame(buffer).to_parquet(run.workset_dir / f"shard-{shard:05d}.parquet", index=False)
-                shard += 1
-                buffer = []
+                write_shard()
     if buffer:
-        pd.DataFrame(buffer).to_parquet(run.workset_dir / f"shard-{shard:05d}.parquet", index=False)
+        write_shard()
     pbar.close()
 
-    n_channels = sum(1 for v in per_channel.values() if v)
-    print(f"Working set: {kept} clips, {seconds / 3600:.2f} h, {n_channels} channels -> {run.workset_dir}")
+    print(f"Added {kept} clips ({seconds / 3600:.2f} h) -> {run.name} now has {len(existing) + kept} clips "
+          f"from {sum(1 for v in per_channel.values() if v)} channels")
     if not done():
         print("Warning: ran out of clips before reaching the target. Raise `files` / `max_per_channel`, "
               "widen `duration`, or lower `pesq_min`.")
-    run.push("workset", f"workset for {run.name}")

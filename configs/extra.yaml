@@ -1,0 +1,17 @@
+# New clips from extra-gt-2.5 (no reference text): the three ASR models vote.
+# Grow it any time: darija prepare -c configs/extra.yaml --add --set select.n=10000
+extends: base.yaml
+run_name: extra-gt
+
+source:
+  config: extra-gt-2.5
+  split: train
+  has_reference: false
+
+select:
+  n: 10000
+  max_per_channel: 400      # applies to the whole run, across every --add
+
+agreement:
+  sources: [cohere, voxtral, moulsot]
+  prefer: [cohere, voxtral, moulsot]

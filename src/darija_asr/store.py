@@ -53,45 +53,106 @@ class Run:
         return self.root / "eval"
 
     # -- hub sync ---------------------------------------------------------
-    def push(self, subpath: str = "", message: str | None = None) -> None:
-        """Upload root/subpath to the hub repo under <run_name>/subpath. No-op without hub_repo."""
+    # Several machines can work on one run at once (e.g. Voxtral on Kaggle while
+    # Cohere and MoulSot run on Colab). That is safe because every writer only
+    # adds new, uniquely named files (part-<time>-<uuid>, shard-<time>-...) and
+    # never rewrites a shared one; the hub orders the commits.
+    def push(self, subpath: str = "", message: str | None = None, retries: int = 5) -> bool:
+        """Upload root/subpath (file or folder) to the hub repo under <run_name>/subpath.
+
+        No-op without hub_repo. Never raises: a failed upload is retried, then
+        reported, and the next push uploads the same (append-only) files again.
+        """
         repo = self.cfg.get("hub_repo")
-        if not repo:
-            return
+        local = self.root / subpath
+        if not repo or not local.exists():
+            return False
         from huggingface_hub import HfApi
 
         api = HfApi()
-        api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-        local = self.root / subpath
-        if not local.exists():
-            return
-        path_in_repo = f"{self.name}/{subpath}".rstrip("/")
-        if local.is_file():
-            api.upload_file(path_or_fileobj=str(local), path_in_repo=path_in_repo,
-                            repo_id=repo, repo_type="dataset",
-                            commit_message=message or f"update {path_in_repo}")
-        else:
-            api.upload_folder(folder_path=str(local), path_in_repo=path_in_repo,
-                              repo_id=repo, repo_type="dataset",
-                              commit_message=message or f"update {path_in_repo}")
+        path_in_repo = f"{self.name}/{subpath}".rstrip("/").replace("\\", "/")
+        for attempt in range(retries):
+            try:
+                api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
+                if local.is_file():
+                    api.upload_file(path_or_fileobj=str(local), path_in_repo=path_in_repo,
+                                    repo_id=repo, repo_type="dataset",
+                                    commit_message=message or f"update {path_in_repo}")
+                else:
+                    api.upload_folder(folder_path=str(local), path_in_repo=path_in_repo,
+                                      repo_id=repo, repo_type="dataset",
+                                      commit_message=message or f"update {path_in_repo}")
+                return True
+            except Exception as exc:  # noqa: BLE001 - network/hub errors must not stop a long run
+                wait = 10 * 2 ** attempt
+                print(f"[hub] push of {path_in_repo} failed ({exc!r:.200}); retry in {wait}s")
+                time.sleep(wait)
+        print(f"[hub] giving up on {path_in_repo} for now; it will go up with the next push")
+        return False
 
-    def pull(self, subpath: str = "") -> None:
-        """Download <run_name>/subpath from the hub repo into the local work dir."""
+    def push_file(self, path: Path, message: str | None = None) -> bool:
+        """Upload one file that lives under the run folder (e.g. a fresh part)."""
+        return self.push_files([path], message)
+
+    def push_files(self, paths: list[Path], message: str | None = None, retries: int = 5) -> bool:
+        """Upload files under the run folder in one commit (adds only, never deletes)."""
+        repo = self.cfg.get("hub_repo")
+        if not repo or not paths:
+            return False
+        from huggingface_hub import CommitOperationAdd, HfApi
+
+        api = HfApi()
+        for attempt in range(retries):
+            ops = [CommitOperationAdd(path_in_repo=f"{self.name}/{p.relative_to(self.root).as_posix()}",
+                                      path_or_fileobj=str(p)) for p in paths]
+            try:
+                api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
+                api.create_commit(repo_id=repo, repo_type="dataset", operations=ops,
+                                  commit_message=message or f"add {len(ops)} file(s) to {self.name}")
+                return True
+            except Exception as exc:  # noqa: BLE001 - network/hub errors must not stop a long run
+                wait = 10 * 2 ** attempt
+                print(f"[hub] upload of {len(ops)} file(s) failed ({exc!r:.200}); retry in {wait}s")
+                time.sleep(wait)
+        print("[hub] giving up for now; `darija push` uploads everything later")
+        return False
+
+    def pull(self, subpath: str = "", quiet: bool = False, patterns: list[str] | None = None) -> None:
+        """Download <run_name>/subpath (or <run_name>/<pattern>s) from the hub repo.
+
+        Only adds/updates files; local files that are not on the hub stay.
+        """
         repo = self.cfg.get("hub_repo")
         if not repo:
+            if quiet:
+                return
             raise SystemExit("hub_repo is not set in the config")
         from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import RepositoryNotFoundError
 
-        pattern = f"{self.name}/{subpath}".rstrip("/")
-        snapshot_download(repo_id=repo, repo_type="dataset",
-                          local_dir=str(Path(self.cfg["workdir"])),
-                          allow_patterns=[pattern, f"{pattern}/*", f"{pattern}/**"])
+        if patterns:
+            allow = [f"{self.name}/{p}" for p in patterns]
+        else:
+            pattern = f"{self.name}/{subpath}".rstrip("/")
+            allow = [pattern, f"{pattern}/*", f"{pattern}/**"]
+        try:
+            snapshot_download(repo_id=repo, repo_type="dataset",
+                              local_dir=str(Path(self.cfg["workdir"])), allow_patterns=allow)
+        except RepositoryNotFoundError:
+            if not quiet:
+                raise
+            print(f"[hub] {repo} does not exist yet; nothing to pull")
+
+
+    def pull_for_judging(self) -> None:
+        """Everything agree/merge/labels need, without the (large) workset audio."""
+        self.pull(patterns=["workset/index-*.parquet", "asr/**", "merge/**"], quiet=True)
 
 
 def write_part(df: pd.DataFrame, directory: Path, prefix: str = "part") -> Path:
-    """Write an append-only part file; names never collide across sessions."""
+    """Write an append-only part file; names never collide across sessions or machines."""
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:6]}.parquet"
+    path = directory / f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}.parquet"
     df.to_parquet(path, index=False)
     return path
 
@@ -123,9 +184,16 @@ def done_ids(directory: Path) -> set[str]:
     return set(df["id"])
 
 
+WORKSET_META = ["id", "channel", "duration", "pesq_hyp", "reference"]
+
+
 def read_workset(run: Run, with_audio: bool = True) -> pd.DataFrame:
-    cols = None if with_audio else ["id", "channel", "duration", "pesq_hyp", "reference"]
-    df = read_parts(run.workset_dir, "shard-*.parquet", columns=cols)
+    """The run's clips. Without audio it reads the small index files when they exist,
+    so a machine that only judges never has to download the audio."""
+    if not with_audio and any(run.workset_dir.glob("index-*.parquet")):
+        df = read_parts(run.workset_dir, "index-*.parquet", columns=WORKSET_META)
+    else:
+        df = read_parts(run.workset_dir, "shard-*.parquet", columns=None if with_audio else WORKSET_META)
     if df.empty:
         raise SystemExit(f"No working set in {run.workset_dir}. Run `darija prepare` (or `darija pull`) first.")
     return df

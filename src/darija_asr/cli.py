@@ -22,7 +22,9 @@ def main(argv: list[str] | None = None) -> None:
                     help="row groups (~100 MB each) to download for durations when the split has none")
 
     sp = cmd("prepare", "sample clips from MoulSot-Full into the run's working set")
-    sp.add_argument("--force", action="store_true", help="rebuild an existing working set")
+    sp.add_argument("--force", action="store_true", help="rebuild an existing working set (local only)")
+    sp.add_argument("--add", action="store_true",
+                    help="grow the run by select.n new clips (or select.hours) that it does not have yet")
 
     sp = cmd("smoke", "transcribe a few clips with one model and print them (nothing saved)")
     sp.add_argument("--model", required=True)
@@ -79,7 +81,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "prepare":
         from .data.select import prepare
 
-        prepare(cfg, force=args.force)
+        prepare(cfg, force=args.force, add=args.add)
     elif args.cmd == "smoke":
         from .asr.run import smoke
 

@@ -1,6 +1,7 @@
-# Gold set: clips from the held-out MoulSot test split. Run the whole pipeline on
-# it (all models + the judge), then hand-correct gold/gold.csv.
-# Every other run excludes these ids via resources/gold_ids.txt.
+# Gold set: clips from MoulSot's held-out 100-gt-2.5 TEST split (MoulSot never
+# trained on them, so all four sources are fair here). Judge everything, export,
+# then hand-correct gold/gold.csv. The other runs use the train split or
+# extra-gt, so they never overlap with gold.
 extends: base.yaml
 run_name: gold
 
@@ -9,10 +10,9 @@ source:
   split: test
 
 select:
-  n: 400
-  max_per_channel: 25
+  n: 300
+  max_per_channel: 60       # the test split has only ~6 channels
   exclude_ids: []
 
 agreement:
   sources: [reference, cohere, voxtral, moulsot]
-

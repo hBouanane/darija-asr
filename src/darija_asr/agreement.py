@@ -56,6 +56,7 @@ def load_sources(run: Run, sources: list[str]) -> pd.DataFrame:
 
 def compute_agreement(cfg: dict) -> pd.DataFrame:
     run = Run(cfg)
+    run.pull_for_judging()  # transcripts from every machine, without the audio
     acfg = cfg["agreement"]
     sources = acfg["sources"]
     df = load_sources(run, sources)
