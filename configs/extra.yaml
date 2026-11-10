@@ -9,8 +9,8 @@ source:
   has_reference: false
 
 select:
-  n: 10000
-  max_per_channel: 400      # applies to the whole run, across every --add
+  n: 30000
+  max_per_channel: 400 # applies to the whole run, across every --add
 
 agreement:
   sources: [cohere, voxtral, moulsot]

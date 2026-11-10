@@ -10,8 +10,8 @@ source:
   split: test
 
 select:
-  n: 300
-  max_per_channel: 60       # the test split has only ~6 channels
+  n: 500
+  max_per_channel: 60 # the test split has only ~6 channels
   exclude_ids: []
 
 agreement:
