@@ -19,7 +19,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from tqdm import tqdm
 
 from .. import audio as audio_utils
 from ..store import WORKSET_META, Run, read_ids_file, read_workset
@@ -57,12 +56,18 @@ def read_metadata(fs, files: list[str], workers: int = 16) -> pd.DataFrame:
     Each file costs a few network round trips and little data, so reading many
     at once is ~10x faster than one by one.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     print(f"Reading clip metadata (no audio) from {len(files)} files, {workers} at a time...", flush=True)
+    frames = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        frames = list(tqdm(pool.map(lambda p: _file_metadata(fs, p), files), total=len(files),
-                           desc="metadata", mininterval=5))
+        futures = [pool.submit(_file_metadata, fs, p) for p in files]
+        # Plain lines, not a tqdm bar: bars don't render in notebook cells or log files.
+        step = max(1, len(files) // 10)
+        for done, fut in enumerate(as_completed(futures), 1):
+            frames.append(fut.result())
+            if done % step == 0 or done == len(files):
+                print(f"  metadata: {done}/{len(files)} files", flush=True)
     return pd.concat(frames, ignore_index=True)
 
 
@@ -122,6 +127,7 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
     from huggingface_hub import HfFileSystem
 
     run = Run(cfg)
+    print(f"Checking which clips {run.name} already has...", flush=True)
     existing = _existing(run)
     if len(existing) and not add:
         if not force:
@@ -155,8 +161,8 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
 
     fs = HfFileSystem()
     rows = eligible(read_metadata(fs, files), sel, has_reference, exclude)
+    print(f"{len(rows)} new clips pass the metadata filters, from {rows['channel'].nunique()} channels", flush=True)
     print("Downloading audio row groups (~100 MB each) and keeping the clips that pass...", flush=True)
-    print(f"{len(rows)} new clips pass the metadata filters, from {rows['channel'].nunique()} channels")
 
     run.workset_dir.mkdir(parents=True, exist_ok=True)
     per_channel: dict[str, int] = defaultdict(int, existing["channel"].value_counts().to_dict())
@@ -165,7 +171,8 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
     kept = shard = 0
     seconds = 0.0
     rng = np.random.default_rng(sel["seed"] + len(existing))
-    pbar = tqdm(total=max_clips or int(max_seconds), desc="clips" if max_clips else "seconds", mininterval=5)
+    target = f"{max_clips} clips" if max_clips else f"{max_seconds / 3600:.1f} h"
+    groups_done = 0
     # Shards go up in a background thread so downloading/selecting keeps going.
     from concurrent.futures import ThreadPoolExecutor
 
@@ -186,11 +193,11 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
 
         def upload() -> None:
             if run.push_files([shard_path, index_path], f"{run.name}: workset +{len(df)} clips"):
-                tqdm.write(f"[hub] shard {n} uploaded ({len(df)} clips)")
+                print(f"  [hub] shard {n} uploaded ({len(df)} clips)", flush=True)
 
         if cfg.get("hub_repo"):
             uploads.append(uploader.submit(upload))
-        tqdm.write(f"shard {n} saved: {kept} clips so far")
+        print(f"  shard {n} saved: {kept} clips so far", flush=True)
         shard += 1
         buffer = []
 
@@ -208,6 +215,10 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
             table = pq.ParquetFile(f).read_row_group(int(rg), columns=["id", "audio"])
         audio_by_id = dict(zip(table.column("id").to_pylist(),
                                (a["bytes"] for a in table.column("audio").to_pylist())))
+        groups_done += 1
+        if groups_done % 10 == 0:
+            print(f"  {groups_done} row groups downloaded, {kept} clips kept ({seconds / 3600:.1f} h) of {target}",
+                  flush=True)
         for rec in group.iloc[rng.permutation(len(group))].to_dict("records"):
             if done():
                 break
@@ -224,12 +235,10 @@ def prepare(cfg: dict, force: bool = False, add: bool = False) -> None:
             per_channel[rec["channel"]] += 1
             kept += 1
             seconds += dur
-            pbar.update(1 if max_clips else int(dur))
             if len(buffer) >= sel["shard_size"]:
                 write_shard()
     if buffer:
         write_shard()
-    pbar.close()
     if uploads:
         print(f"Waiting for {sum(not u.done() for u in uploads)} shard upload(s) to finish...", flush=True)
     for u in uploads:
