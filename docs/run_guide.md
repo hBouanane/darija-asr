@@ -176,11 +176,25 @@ uv run darija merge -c configs/extra.yaml $J --set "merge.extra_body={chat_templ
 
 ## 5. Gold set
 
+After `labels` for the gold run:
+
 ```bash
-uv run darija gold-export -c configs/gold.yaml      # wav files + gold.csv to correct by hand
-# listen, fix gold_text, put x in `checked`, then:
-uv run darija eval -c configs/gold.yaml
+uv run darija gold-ui -c configs/gold.yaml   # exports wav + gold.csv (pre-filled with the judge's text) + review.html
 ```
+
+Download the whole `work/gold/gold/` folder (audio included) and open `review.html` in a browser.
+Each clip shows its audio, the gold text to correct, the judge's verdict and every source, with the
+words that differ from your text highlighted ("use this" copies a candidate into the box).
+Shortcuts: Alt+P play/pause, Alt+R replay, Alt+←/→ previous/next, Ctrl+Enter mark checked and next.
+Edits autosave in that browser. When done (or to keep a backup), click **Export gold.csv**, put the
+file back as `work/gold/gold/gold.csv`, then:
+
+```bash
+uv run darija push -c configs/gold.yaml --path gold/gold.csv
+uv run darija eval -c configs/gold.yaml        # only checked rows count
+```
+
+Rerunning `gold-ui` later keeps your corrections: it reads the existing `gold.csv`.
 
 ## Adding more data later
 

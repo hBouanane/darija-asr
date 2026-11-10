@@ -52,3 +52,23 @@ def test_openai_response_parsing():
 def test_hub_repo_from_env(monkeypatch):
     monkeypatch.setenv("DARIJA_HUB_REPO", "me/work")
     assert load_config("configs/extra.yaml")["hub_repo"] == "me/work"
+
+
+def test_gold_ui_page(tmp_path):
+    from darija_asr.data.gold import GOLD_COLUMNS
+    from darija_asr.data.gold_ui import build_page, gold_records
+
+    cfg, run = _run(tmp_path, ["cohere", "voxtral"])
+    run.gold_dir.mkdir(parents=True)
+    pd.DataFrame([{"n": 0, "id": "a", "channel": "c1", "duration": 1.0, "audio_file": "audio/0000.wav",
+                   "gold_text": "واحد", "checked": "", "comment": ""}], columns=GOLD_COLUMNS
+                 ).to_csv(run.gold_dir / "gold.csv", index=False, encoding="utf-8-sig")
+    write_part(pd.DataFrame({"id": ["a"], "text": ["واحد"], "error": [None]}), run.asr_dir("cohere"))
+    write_part(pd.DataFrame({"id": ["a"], "text": ["وحد </script>"], "error": [None]}), run.asr_dir("voxtral"))
+    write_part(pd.DataFrame([{"id": "a", "text": "واحد", "reject": False, "confidence": "high", "notes": "",
+                              "error": None}]), run.merge_dir)
+    recs = gold_records(cfg)
+    assert recs[0]["candidates"] == {"cohere": "واحد", "voxtral": "وحد </script>"}
+    assert recs[0]["judge"]["confidence"] == "high"
+    page = build_page(recs, "gold")
+    assert page.count("</script>") == 2  # the candidate's "</script>" is escaped inside the JSON

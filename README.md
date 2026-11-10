@@ -49,7 +49,7 @@ Run every command as `uv run darija <command> -c configs/<run>.yaml` from the re
 | `agree` | pairwise CER between sources (kept as label columns) |
 | `merge` | the LLM judge, one clip per request; resumable; waits for clips missing a source |
 | `labels` | final text per clip -> `labels.parquet` |
-| `gold-export`, `eval` | export the gold set for hand correction; score every system against it |
+| `gold-ui`, `eval` | review page to correct and check the gold set; score every system against it |
 | `build-train -c A -c B --out repo --push` | join labels + audio into a training dataset |
 | `push`, `pull` | upload / download a run (or `--path` inside it) |
 

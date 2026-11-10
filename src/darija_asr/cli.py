@@ -47,6 +47,8 @@ def main(argv: list[str] | None = None) -> None:
     sp = cmd("gold-export", "export the gold run as wav + gold.csv for hand correction")
     sp.add_argument("--prefill", choices=["reference", "merged", "empty"], default="reference")
 
+    cmd("gold-ui", "write gold/review.html: listen, compare candidates, correct and check each clip")
+
     sp = cmd("eval", "score all systems against the checked gold set")
     sp.add_argument("--gold", help="path to gold.csv (default: <run>/gold/gold.csv)")
     sp.add_argument("--hyp", action="append", default=[], metavar="NAME=PATH",
@@ -108,6 +110,10 @@ def main(argv: list[str] | None = None) -> None:
         from .data.gold import export_gold
 
         export_gold(cfg, args.prefill)
+    elif args.cmd == "gold-ui":
+        from .data.gold_ui import write_gold_ui
+
+        write_gold_ui(cfg)
     elif args.cmd == "eval":
         from .eval.run import evaluate
 
