@@ -19,6 +19,17 @@ from pathlib import Path
 import pandas as pd
 
 
+_warned_no_hub = False
+
+
+def _warn_no_hub() -> None:
+    global _warned_no_hub
+    if not _warned_no_hub:
+        _warned_no_hub = True
+        print("[hub] WARNING: no hub_repo (set DARIJA_HUB_REPO): results stay on this machine only, "
+              "and other machines (Kaggle, Colab) will not see them.", flush=True)
+
+
 class Run:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -65,7 +76,10 @@ class Run:
         """
         repo = self.cfg.get("hub_repo")
         local = self.root / subpath
-        if not repo or not local.exists():
+        if not repo:
+            _warn_no_hub()
+            return False
+        if not local.exists():
             return False
         from huggingface_hub import HfApi
 
@@ -100,7 +114,10 @@ class Run:
     def push_files(self, paths: list[Path], message: str | None = None, retries: int = 5) -> bool:
         """Upload files under the run folder in one commit (adds only, never deletes)."""
         repo = self.cfg.get("hub_repo")
-        if not repo or not paths:
+        if not repo:
+            _warn_no_hub()
+            return False
+        if not paths:
             return False
         from huggingface_hub import CommitOperationAdd, HfApi
 
