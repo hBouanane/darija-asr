@@ -79,9 +79,12 @@ class Run:
                                     repo_id=repo, repo_type="dataset",
                                     commit_message=message or f"update {path_in_repo}")
                 else:
-                    api.upload_folder(folder_path=str(local), path_in_repo=path_in_repo,
-                                      repo_id=repo, repo_type="dataset",
-                                      commit_message=message or f"update {path_in_repo}")
+                    # Resumable: retries failed files, skips ones already uploaded, and
+                    # batches commits (the hub allows ~1000 requests per 5 minutes).
+                    # The repo mirrors workdir/<run>/..., so upload workdir filtered to this path.
+                    api.upload_large_folder(repo_id=repo, repo_type="dataset", private=True,
+                                            folder_path=str(Path(self.cfg["workdir"])),
+                                            allow_patterns=[f"{path_in_repo}/**"], num_workers=2)
                 return True
             except Exception as exc:  # noqa: BLE001 - network/hub errors must not stop a long run
                 wait = 10 * 2 ** attempt
