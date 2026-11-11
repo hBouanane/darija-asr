@@ -72,3 +72,29 @@ def test_gold_ui_page(tmp_path):
     assert recs[0]["judge"]["confidence"] == "high"
     page = build_page(recs, "gold")
     assert page.count("</script>") == 2  # the candidate's "</script>" is escaped inside the JSON
+
+
+def test_hub_auth_error_stops_retries(tmp_path, monkeypatch):
+    import darija_asr.store as store
+
+    class Resp:
+        status_code = 401
+
+    class Unauthorized(Exception):
+        response = Resp()
+
+    calls = []
+
+    class Api:
+        def create_repo(self, *a, **k):
+            calls.append(1)
+            raise Unauthorized()
+
+    monkeypatch.setattr("huggingface_hub.HfApi", lambda: Api())
+    monkeypatch.setattr(store, "_auth_failed", False)
+    monkeypatch.setattr(store.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("no retry wait")))
+    cfg, run = _run(tmp_path, ["cohere"])
+    cfg["hub_repo"] = "me/work"
+    f = run.workset_dir / "index-20260101-000000-00000.parquet"
+    assert run.push_files([f]) is False and run.push_files([f]) is False
+    assert calls == [1]  # second call skipped without touching the hub

@@ -123,7 +123,14 @@ def main(argv: list[str] | None = None) -> None:
         from .store import Run
 
         run = Run(cfg)
-        run.push(args.path) if args.cmd == "push" else run.pull(args.path)
+        if args.cmd == "pull":
+            run.pull(args.path)
+        elif not cfg.get("hub_repo"):
+            raise SystemExit("Set DARIJA_HUB_REPO (or hub_repo in the config) first.")
+        elif not run.push(args.path):
+            raise SystemExit(f"Upload of {run.name}/{args.path} failed; see the [hub] messages above.")
+        else:
+            print(f"Uploaded {run.name}/{args.path} to {cfg['hub_repo']}")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,25 @@ def _warn_no_hub() -> None:
               "and other machines (Kaggle, Colab) will not see them.", flush=True)
 
 
+_auth_failed = False
+
+
+def _auth_error(exc: Exception) -> bool:
+    """401/403 from the hub: a bad or read-only token. Retrying cannot fix it, so
+    stop uploading for the rest of this process (files stay on disk for `darija push`)."""
+    global _auth_failed
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status not in (401, 403):
+        return False
+    if not _auth_failed:
+        _auth_failed = True
+        print(f"[hub] ERROR {status}: Hugging Face rejected the token. Set HF_TOKEN to a token with WRITE "
+              "access (huggingface.co/settings/tokens). Uploads are skipped for the rest of this command; "
+              "the files stay on disk, upload them later with `darija push -c <config> --path <folder>`.",
+              flush=True)
+    return True
+
+
 class Run:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -79,7 +98,7 @@ class Run:
         if not repo:
             _warn_no_hub()
             return False
-        if not local.exists():
+        if not local.exists() or _auth_failed:
             return False
         from huggingface_hub import HfApi
 
@@ -101,6 +120,8 @@ class Run:
                                             allow_patterns=[f"{path_in_repo}/**"], num_workers=2)
                 return True
             except Exception as exc:  # noqa: BLE001 - network/hub errors must not stop a long run
+                if _auth_error(exc):
+                    return False
                 wait = 10 * 2 ** attempt
                 print(f"[hub] push of {path_in_repo} failed ({exc!r:.200}); retry in {wait}s")
                 time.sleep(wait)
@@ -117,7 +138,7 @@ class Run:
         if not repo:
             _warn_no_hub()
             return False
-        if not paths:
+        if not paths or _auth_failed:
             return False
         from huggingface_hub import CommitOperationAdd, HfApi
 
@@ -131,6 +152,8 @@ class Run:
                                   commit_message=message or f"add {len(ops)} file(s) to {self.name}")
                 return True
             except Exception as exc:  # noqa: BLE001 - network/hub errors must not stop a long run
+                if _auth_error(exc):
+                    return False
                 wait = 10 * 2 ** attempt
                 print(f"[hub] upload of {len(ops)} file(s) failed ({exc!r:.200}); retry in {wait}s")
                 time.sleep(wait)
