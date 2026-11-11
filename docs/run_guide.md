@@ -69,8 +69,11 @@ Cell 2: code + a separate environment for the vLLM server (in `/tmp`: `/kaggle/w
 cd /tmp && pip install -q uv
 git clone https://github.com/hBouanane/darija-asr.git
 cd darija-asr && uv sync
-uv venv /tmp/vllm-env --python 3.12
-uv pip install --python /tmp/vllm-env/bin/python -U vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
+[ -x /tmp/vllm-env/bin/vllm ] || {
+  uv venv -q --clear /tmp/vllm-env --python 3.12
+  uv pip install -q --python /tmp/vllm-env/bin/python vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
+}
+uv pip uninstall -q --python /tmp/vllm-env/bin/python torchaudio || true
 ```
 
 Cell 3 (Python): one vLLM server using both GPUs (`--data-parallel-size 2`), then wait until it is up.
@@ -120,11 +123,17 @@ Speed: ~3.9x real time per T4, so 10,000 extra clips (~17 h of audio) take ~2-2.
 
 ## 3. Colab: Cohere and MoulSot (T4)
 
-Same setup as step 1 (`HF_TOKEN`, `DARIJA_HUB_REPO`), plus the vLLM server environment:
+Same setup as step 1 (`HF_TOKEN`, `DARIJA_HUB_REPO`), plus the vLLM server environment (once per VM).
+Remove torchaudio from it: `--torch-backend=auto` can pick a PyTorch built for a newer CUDA than
+torchaudio's, and vLLM then fails at import ("PyTorch and TorchAudio were compiled with different CUDA
+versions"). vLLM does not need it for these models.
 
 ```bash
-uv venv /content/vllm-env --python 3.12
-uv pip install --python /content/vllm-env/bin/python -U vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
+[ -x /content/vllm-env/bin/vllm ] || {
+  uv venv -q --clear /content/vllm-env --python 3.12
+  uv pip install -q --python /content/vllm-env/bin/python vllm --torch-backend=auto "mistral-common[audio]>=1.9.0" "transformers>=5"
+}
+uv pip uninstall -q --python /content/vllm-env/bin/python torchaudio || true
 ```
 
 Cohere (transformers is faster than vLLM on a T4):
