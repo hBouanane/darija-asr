@@ -177,13 +177,16 @@ transcribed yet ("N clips wait for missing transcripts"): rerun it when they are
 
 ### Judge on Modal (Gemma 4 31B)
 
-`deploy/modal_judge.py` serves `google/gemma-4-31B-it` with vLLM on one H100 (~$3.95/h on Modal).
-The server is private (a Modal proxy token is required), scales to zero after 5 minutes without
-requests, and never runs more than one GPU.
+`deploy/modal_judge.py` serves Gemma 4 31B with vLLM on Modal. By default it runs Google's 4-bit
+quantization-aware-trained checkpoint (`google/gemma-4-31B-it-qat-w4a16-ct`, ~23 GB) on one L40S
+(~$1.95/h); `JUDGE_VARIANT=bf16` runs the full model (~62 GB) on one H100 (~$3.95/h) instead.
+Both answer to the model name `judge`. The server is private (a Modal proxy token is required),
+scales to zero after 5 minutes without requests, and never runs more than one GPU.
 
 Once:
 
-1. Accept the Gemma license on https://huggingface.co/google/gemma-4-31B-it.
+1. Accept the Gemma license on https://huggingface.co/google/gemma-4-31B-it (and on
+   https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct if it asks separately).
 2. Install the CLI and log in: `pip install modal`, then `modal setup`.
 3. Give Modal your HF token (for the gated weights): `modal secret create huggingface-secret HF_TOKEN=hf_xxx`
 4. Create a proxy token: Modal dashboard > Settings > Proxy Auth Tokens. Keep its ID and secret.
@@ -191,16 +194,17 @@ Once:
 Deploy (prints the server URL, e.g. `https://<workspace>--darija-judge-judge.us-east.modal.direct`):
 
 ```bash
-modal deploy deploy/modal_judge.py
+modal deploy deploy/modal_judge.py                      # 4-bit QAT on an L40S
+# JUDGE_VARIANT=bf16 modal deploy deploy/modal_judge.py # full bf16 on an H100
 ```
 
 Judge, from any machine with the repo (no GPU needed). The first request starts the GPU and
-downloads ~62 GB of weights (10-20 min); later starts take a few minutes.
+downloads the weights (~23 GB for QAT, a few minutes); later starts are faster.
 
 ```bash
 export MODAL_JUDGE_TOKEN="<token-id>.<token-secret>"
 J='--set merge.base_url=https://<workspace>--darija-judge-judge.us-east.modal.direct/v1
-   --set merge.api_key_env=MODAL_JUDGE_TOKEN --set merge.model=google/gemma-4-31B-it
+   --set merge.api_key_env=MODAL_JUDGE_TOKEN --set merge.model=judge
    --set merge.workers=96 --set merge.max_tokens=1024'
 T='merge.extra_body={chat_template_kwargs: {enable_thinking: false}}'
 
@@ -214,8 +218,9 @@ done
 modal app stop darija-judge     # stop paying as soon as it is done
 ```
 
-Cost: ~35k clips at ~2k tokens in and ~150 out each; on one H100 that is roughly 1-3 GPU hours,
-so about $5-15 including start-up. Thinking stays off (`enable_thinking: false`): it would multiply
+Cost: ~35k clips at ~2k tokens in and ~150 out each: roughly 1-3 GPU hours, so about $3-8 on the
+L40S (QAT) or $5-15 on the H100 (bf16), including start-up. To compare quality, judge 30 gold clips
+with each variant (redeploy in between) and read them side by side. Thinking stays off (`enable_thinking: false`): it would multiply
 the output tokens, and so the cost, several times. `merge` resumes where it stopped, so a dropped
 connection or a stopped app loses nothing.
 
