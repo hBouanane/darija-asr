@@ -1,0 +1,64 @@
+"""Gemma 4 31B as the transcript judge, served by vLLM on Modal (OpenAI-compatible).
+
+    modal deploy deploy/modal_judge.py       # prints the server URL
+    modal app stop darija-judge              # when the judging is done
+
+The server is private: Modal requires a proxy token on every request
+(Authorization: Bearer <token-id>.<token-secret>), which is what `darija merge`
+sends from merge.api_key_env. It scales to zero after SCALEDOWN of no requests,
+and MAX_CONTAINERS caps how many GPUs can run at once (and so the spend).
+See docs/run_guide.md, "Judge on Modal".
+"""
+import json
+import subprocess
+
+import modal
+
+MODEL = "google/gemma-4-31B-it"      # gated: accept the license on its Hub page first
+GPU = "H100"                         # 31B in bf16 is ~62 GB of weights; an H100 has 80 GB
+MAX_MODEL_LEN = 8192                 # system prompt + 3-4 candidates + verdict fit in ~3k
+MAX_CONTAINERS = 1
+SCALEDOWN = 5 * 60                   # seconds without requests before the GPU is released
+MINUTES = 60
+
+image = (
+    modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
+    .entrypoint([])
+    .uv_pip_install("vllm==0.21.0", "transformers==5.8.1")
+    .env({"HF_XET_HIGH_PERFORMANCE": "1"})
+)
+hf_cache = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
+vllm_cache = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+
+app = modal.App("darija-judge")
+
+
+@app.server(
+    image=image,
+    gpu=GPU,
+    secrets=[modal.Secret.from_name("huggingface-secret")],  # HF_TOKEN, for the gated weights
+    volumes={"/root/.cache/huggingface": hf_cache, "/root/.cache/vllm": vllm_cache},
+    port=8000,
+    startup_timeout=30 * MINUTES,     # first start downloads ~62 GB of weights
+    scaledown_window=SCALEDOWN,
+    max_containers=MAX_CONTAINERS,
+    target_concurrency=128,           # requests per container; vLLM batches them
+)
+class Judge:
+    @modal.enter()
+    def start(self):
+        cmd = [
+            "vllm", "serve", MODEL,
+            "--served-model-name", MODEL,
+            "--host", "0.0.0.0", "--port", "8000",
+            "--max-model-len", str(MAX_MODEL_LEN),
+            "--gpu-memory-utilization", "0.92",
+            # text only: no image/audio inputs, so no memory reserved for them
+            "--limit-mm-per-prompt", json.dumps({"image": 0, "video": 0, "audio": 0}),
+            "--reasoning-parser", "gemma4",
+        ]
+        self.process = subprocess.Popen(cmd)
+
+    @modal.exit()
+    def stop(self):
+        self.process.terminate()

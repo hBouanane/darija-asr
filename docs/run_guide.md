@@ -175,13 +175,52 @@ uv run darija build-train -c configs/gt100.yaml -c configs/extra.yaml --out your
 `merge` skips clips that already have a verdict, and waits for clips that some model has not
 transcribed yet ("N clips wait for missing transcripts"): rerun it when they are done.
 
-Gemma 4 31B on a rented GPU instead: start `vllm serve google/gemma-4-31b-it --max-model-len 8192` on
-the pod, then point the judge at it:
+### Judge on Modal (Gemma 4 31B)
+
+`deploy/modal_judge.py` serves `google/gemma-4-31B-it` with vLLM on one H100 (~$3.95/h on Modal).
+The server is private (a Modal proxy token is required), scales to zero after 5 minutes without
+requests, and never runs more than one GPU.
+
+Once:
+
+1. Accept the Gemma license on https://huggingface.co/google/gemma-4-31B-it.
+2. Install the CLI and log in: `pip install modal`, then `modal setup`.
+3. Give Modal your HF token (for the gated weights): `modal secret create huggingface-secret HF_TOKEN=hf_xxx`
+4. Create a proxy token: Modal dashboard > Settings > Proxy Auth Tokens. Keep its ID and secret.
+
+Deploy (prints the server URL, e.g. `https://<workspace>--darija-judge-judge.us-east.modal.direct`):
 
 ```bash
-J="--set merge.base_url=http://<pod-ip>:8000/v1 --set merge.api_key_env=null --set merge.model=google/gemma-4-31b-it --set merge.workers=96"
-uv run darija merge -c configs/extra.yaml $J --set "merge.extra_body={chat_template_kwargs: {enable_thinking: false}}"
+modal deploy deploy/modal_judge.py
 ```
+
+Judge, from any machine with the repo (no GPU needed). The first request starts the GPU and
+downloads ~62 GB of weights (10-20 min); later starts take a few minutes.
+
+```bash
+export MODAL_JUDGE_TOKEN="<token-id>.<token-secret>"
+J='--set merge.base_url=https://<workspace>--darija-judge-judge.us-east.modal.direct/v1
+   --set merge.api_key_env=MODAL_JUDGE_TOKEN --set merge.model=google/gemma-4-31B-it
+   --set merge.workers=96 --set merge.max_tokens=1024'
+T='merge.extra_body={chat_template_kwargs: {enable_thinking: false}}'
+
+uv run darija agree -c configs/gold.yaml
+uv run darija merge -c configs/gold.yaml $J --set "$T" --limit 30     # test: read the output, note the speed
+uv run darija merge -c configs/gold.yaml $J --set "$T"                # the rest of gold
+for run in gt100 extra; do
+  uv run darija agree -c configs/$run.yaml
+  uv run darija merge -c configs/$run.yaml $J --set "$T"
+done
+modal app stop darija-judge     # stop paying as soon as it is done
+```
+
+Cost: ~35k clips at ~2k tokens in and ~150 out each; on one H100 that is roughly 1-3 GPU hours,
+so about $5-15 including start-up. Thinking stays off (`enable_thinking: false`): it would multiply
+the output tokens, and so the cost, several times. `merge` resumes where it stopped, so a dropped
+connection or a stopped app loses nothing.
+
+Gemma on another GPU host (RunPod, a university server): run the same `vllm serve` command there and
+point `merge.base_url` at `http://<host>:8000/v1` with `merge.api_key_env=null`.
 
 ## 5. Gold set
 
