@@ -7,7 +7,7 @@ from darija_asr.agreement import compute_agreement
 from darija_asr.config import load_config
 from darija_asr.merge.judge_openai import parse_response
 from darija_asr.merge.run import _pending
-from darija_asr.store import Run, read_workset, write_part
+from darija_asr.store import Run, read_parts, read_workset, write_part
 
 
 def _run(tmp_path, sources):
@@ -107,3 +107,42 @@ def test_merge_does_not_wait_for_an_empty_transcript(tmp_path):
     write_part(pd.DataFrame({"id": ["a", "b"], "text": ["واحد", ""], "error": [None, None]}), run.asr_dir("voxtral"))
     compute_agreement(cfg)
     assert sorted(_pending(cfg, run, None)["id"]) == ["a", "b"]
+
+
+def test_transcribe_saves_rows_when_server_goes_down(tmp_path, monkeypatch):
+    import io
+
+    import numpy as np
+    import soundfile as sf
+
+    from darija_asr.asr import run as asr_run
+
+    def wav():
+        buf = io.BytesIO()
+        sf.write(buf, np.zeros(16000, dtype=np.float32), 16000, format="WAV")
+        return buf.getvalue()
+
+    cfg, run = _run(tmp_path, ["voxtral"])
+    for f in run.workset_dir.glob("index-*.parquet"):
+        f.unlink()  # this test's clips live in the shard below
+    pd.DataFrame({"id": [f"c{i}" for i in range(5)], "channel": ["c1"] * 5, "duration": [1.0] * 5,
+                  "pesq_hyp": [3.0] * 5, "reference": [None] * 5, "audio": [wav()] * 5}
+                 ).to_parquet(run.workset_dir / "shard-20260101-000000-00000.parquet")
+    cfg["asr"] = {"flush_every": 2, "models": {"voxtral": {}}}
+
+    class Backend:
+        batch_size = 1
+        calls = 0
+
+        def transcribe(self, audios):
+            Backend.calls += 1
+            if Backend.calls > 3:
+                raise SystemExit("server down")
+            return ["ok"]
+
+    monkeypatch.setattr(asr_run, "load_backend", lambda name, mcfg: Backend())
+    import pytest
+    with pytest.raises(SystemExit):
+        asr_run.transcribe(cfg, "voxtral")
+    done = read_parts(run.asr_dir("voxtral"))
+    assert len(done) == 3 and done["id"].is_unique  # 3 clips saved once each, none lost or doubled

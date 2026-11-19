@@ -43,19 +43,26 @@ def transcribe(cfg: dict, model: str, shard: int = 0, num_shards: int = 1, limit
     backend = load_backend(model, model_cfg)
     flush_every = int(cfg["asr"].get("flush_every", 200))
     rows: list[dict] = []
-    audio_seconds = compute_seconds = 0.0
-
     unpushed: list = []  # parts whose upload failed go up with the next one
 
     def flush():
-        nonlocal rows
         if rows:
             unpushed.append(write_part(pd.DataFrame(rows), out_dir))
             if run.push_files(unpushed, f"{model}: +{len(rows)} (shard {shard}/{num_shards})"):
                 unpushed.clear()
-            rows = []
+            rows.clear()  # in place: the loop holds this same list
 
     pbar = tqdm(total=len(todo_ids), desc=model)
+    try:
+        _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar)
+    finally:
+        # Also on SystemExit (e.g. the vLLM server went down): keep what is done.
+        flush()
+        pbar.close()
+
+
+def _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar) -> None:
+    audio_seconds = compute_seconds = 0.0
     # One working-set shard in memory at a time keeps RAM flat on Colab.
     for shard_file in sorted(run.workset_dir.glob("shard-*.parquet")):
         part = pd.read_parquet(shard_file)
@@ -79,8 +86,6 @@ def transcribe(cfg: dict, model: str, shard: int = 0, num_shards: int = 1, limit
             pbar.set_postfix(rtfx=f"{audio_seconds / max(compute_seconds, 1e-6):.1f}")
             if len(rows) >= flush_every:
                 flush()
-    flush()
-    pbar.close()
 
 
 def smoke(cfg: dict, model: str, n: int = 5) -> None:

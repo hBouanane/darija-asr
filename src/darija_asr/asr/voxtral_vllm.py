@@ -20,6 +20,12 @@ from .base import ASRBackend
 CHUNK_BYTES = 32000  # 1 s of 16 kHz PCM16 per append message
 
 
+class ServerDown(SystemExit):
+    """The vLLM server stopped answering. A SystemExit, so `transcribe` saves its
+    rows and stops instead of timing out clip after clip; restart the server and
+    rerun (only the unfinished clips are redone)."""
+
+
 class VoxtralVllmBackend(ASRBackend):
     def __init__(self, cfg: dict):
         super().__init__(cfg)
@@ -27,6 +33,9 @@ class VoxtralVllmBackend(ASRBackend):
         self.model = cfg["repo"]
         self.concurrency = int(cfg.get("concurrency", 12))
         self.timeout = float(cfg.get("timeout", 120))
+        self.clip_timeout = float(cfg.get("clip_timeout", 180))  # whole session, per clip
+        # http://host:port/health of the same server, to tell "slow" from "frozen"
+        self.health_url = self.url.replace("ws://", "http://").replace("wss://", "https://").split("/v1/")[0] + "/health"
         try:
             asyncio.run(self._ping())
         except OSError as exc:
@@ -60,14 +69,29 @@ class VoxtralVllmBackend(ASRBackend):
                 if event["type"] == "error":
                     raise RuntimeError(f"vLLM error: {event.get('error')}")
 
+    def _healthy(self) -> bool:
+        import httpx
+
+        try:
+            return httpx.get(self.health_url, timeout=10).status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    async def _timed(self, audio: np.ndarray, sem: asyncio.Semaphore) -> str:
+        return await asyncio.wait_for(self._one(audio, sem), self.clip_timeout)
+
     async def _all(self, audios: list[np.ndarray]) -> list[str]:
         sem = asyncio.Semaphore(self.concurrency)
-        results = await asyncio.gather(*(self._one(a, sem) for a in audios), return_exceptions=True)
+        results = await asyncio.gather(*(self._timed(a, sem) for a in audios), return_exceptions=True)
+        if any(isinstance(r, BaseException) for r in results) and not self._healthy():
+            raise ServerDown(f"vLLM server at {self.health_url} is not answering; restart it and rerun")
         # One retry for clips whose session failed (vLLM has known multi-session hiccups).
         for i, res in enumerate(results):
             if isinstance(res, BaseException):
-                results[i] = await self._one(audios[i], sem)
+                results[i] = await self._timed(audios[i], sem)
         return list(results)
 
     def transcribe(self, audios: list[np.ndarray]) -> list[str]:
+        if not self._healthy():
+            raise ServerDown(f"vLLM server at {self.health_url} is not answering; restart it and rerun")
         return asyncio.run(self._all(audios))
