@@ -98,3 +98,12 @@ def test_hub_auth_error_stops_retries(tmp_path, monkeypatch):
     f = run.workset_dir / "index-20260101-000000-00000.parquet"
     assert run.push_files([f]) is False and run.push_files([f]) is False
     assert calls == [1]  # second call skipped without touching the hub
+
+
+def test_merge_does_not_wait_for_an_empty_transcript(tmp_path):
+    cfg, run = _run(tmp_path, ["cohere", "voxtral"])
+    write_part(pd.DataFrame({"id": ["a", "b"], "text": ["واحد", "جوج"], "error": [None, None]}), run.asr_dir("cohere"))
+    # voxtral ran on both; it heard nothing on b
+    write_part(pd.DataFrame({"id": ["a", "b"], "text": ["واحد", ""], "error": [None, None]}), run.asr_dir("voxtral"))
+    compute_agreement(cfg)
+    assert sorted(_pending(cfg, run, None)["id"]) == ["a", "b"]

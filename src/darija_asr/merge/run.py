@@ -56,8 +56,10 @@ def _pending(cfg: dict, run: Run, limit: int | None) -> pd.DataFrame:
     todo = sources[sources["id"].isin(ids)]
     if cfg["merge"].get("require_all_sources", True):
         # A clip judged before every model has transcribed it would keep a weaker
-        # verdict forever (done ids are skipped), so wait for all candidates.
-        present = todo[srcs].apply(lambda col: col.fillna("").astype(str).str.strip() != "")
+        # verdict forever (done ids are skipped), so wait for all candidates. A model
+        # that ran and returned "" is done (it heard nothing); only NaN (no
+        # successful transcript yet) means missing.
+        present = todo[srcs].notna()
         waiting = int((~present.all(axis=1)).sum())
         if waiting:
             print(f"{waiting} clips wait for missing transcripts ({', '.join(srcs)}); rerun merge when done")
