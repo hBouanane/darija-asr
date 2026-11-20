@@ -168,8 +168,9 @@ class Run:
         repo = self.cfg.get("hub_repo")
         if not repo:
             if quiet:
+                _warn_no_hub()
                 return
-            raise SystemExit("hub_repo is not set in the config")
+            raise SystemExit("hub_repo is not set: export DARIJA_HUB_REPO=<user>/darija-asr-work")
         from huggingface_hub import snapshot_download
         from huggingface_hub.utils import RepositoryNotFoundError
 
@@ -238,7 +239,8 @@ def read_workset(run: Run, with_audio: bool = True) -> pd.DataFrame:
     else:
         df = read_parts(run.workset_dir, "shard-*.parquet", columns=None if with_audio else WORKSET_META)
     if df.empty:
-        raise SystemExit(f"No working set in {run.workset_dir}. Run `darija prepare` (or `darija pull`) first.")
+        raise SystemExit(f"No working set in {run.workset_dir}. Run `darija prepare` first, or set "
+                         "DARIJA_HUB_REPO so it is downloaded from the hub.")
     return df
 
 
