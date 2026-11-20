@@ -80,19 +80,26 @@ merge:
   # disagreements = only route=llm; accepted clips keep the `prefer` text unchanged.
   mode: all
   require_all_sources: true # judge a clip only once every source has transcribed it
-  # provider: openai = any OpenAI-compatible chat API (sync only):
-  #   Gemini:  base_url https://generativelanguage.googleapis.com/v1beta/openai, api_key_env GEMINI_API_KEY
-  #   Gemma on RunPod/vLLM: base_url http://<pod>:8000/v1, api_key_env null, model google/gemma-4-31b-it,
-  #     extra_body {chat_template_kwargs: {enable_thinking: false}}
-  # provider: anthropic = Claude (sync, or batch at half price).
-  provider: openai
-  base_url: https://generativelanguage.googleapis.com/v1beta/openai
-  api_key_env: GEMINI_API_KEY
-  model: gemini-2.5-pro
-  extra_body: {}
+  # Default: Gemma 4 31B behind vLLM on Modal (deploy/modal_judge.py). The server URL comes
+  # from DARIJA_JUDGE_URL (https://<workspace>--darija-judge-judge.us-east.modal.direct/v1)
+  # and the Modal proxy token from MODAL_JUDGE_TOKEN ("<token-id>.<token-secret>").
+  # Other judges, via --set:
+  #   Gemini: base_url https://generativelanguage.googleapis.com/v1beta/openai,
+  #           api_key_env GEMINI_API_KEY, model gemini-2.5-pro, extra_body {}
+  #   Gemma elsewhere (RunPod...): base_url http://<host>:8000/v1, api_key_env null
+  #   Claude: provider anthropic, model claude-opus-5-5 (sync, or batch at half price)
+  provider: openai          # any OpenAI-compatible chat API (sync only)
+  base_url: null            # null = $DARIJA_JUDGE_URL
+  api_key_env: MODAL_JUDGE_TOKEN
+  model: judge              # the name deploy/modal_judge.py serves the model under
+  temperature: 0            # greedy: the same candidates always give the same verdict
+  # Thinking off: it multiplies the output tokens (time and cost) and adds little to
+  # choosing between candidates.
+  extra_body:
+    chat_template_kwargs: {enable_thinking: false}
   effort: medium            # anthropic only
-  max_tokens: 8192          # includes thinking tokens on thinking models
-  workers: 16               # requests in flight; raise to 64-128 for a vLLM server
+  max_tokens: 1024          # a verdict is ~150 tokens; raise it if a thinking model is used
+  workers: 96               # requests in flight; the vLLM server batches them
   reveal_sources: false     # true = tell the LLM which system produced each candidate
   style_guide: resources/style_guide.md
   lexicon: null             # optional TSV (e.g. built from DODa): columns word, note

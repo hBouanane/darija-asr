@@ -24,7 +24,10 @@ FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 class OpenAIJudge:
     def __init__(self, mcfg: dict, system_prompt: str):
         self.model = mcfg["model"]
-        self.base_url = mcfg["base_url"].rstrip("/")
+        base_url = mcfg.get("base_url") or os.environ.get("DARIJA_JUDGE_URL")
+        if not base_url:
+            raise SystemExit("Set DARIJA_JUDGE_URL (the judge server's .../v1 URL) or merge.base_url")
+        self.base_url = base_url.rstrip("/")
         key_env = mcfg.get("api_key_env")
         self.api_key = os.environ.get(key_env, "") if key_env else "EMPTY"
         if key_env and not self.api_key:

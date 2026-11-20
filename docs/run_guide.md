@@ -160,13 +160,15 @@ Only one model fits on a T4: run Cohere first (no server), then start the MoulSo
 
 ## 4. Final labels: the judge (any machine, no GPU)
 
-Gemini through its OpenAI-compatible API (the default in `configs/base.yaml`):
+Gemini through its OpenAI-compatible API (instead of the default Gemma judge, see below):
 
 ```bash
 export GEMINI_API_KEY=xxx
+G='--set merge.base_url=https://generativelanguage.googleapis.com/v1beta/openai --set merge.api_key_env=GEMINI_API_KEY
+   --set merge.model=gemini-2.5-pro --set merge.extra_body={} --set merge.workers=16 --set merge.max_tokens=8192'
 for run in gold gt100 extra; do
   uv run darija agree  -c configs/$run.yaml     # pulls every machine's transcripts
-  uv run darija merge  -c configs/$run.yaml     # one clip per request, 16 in flight; resumable
+  uv run darija merge  -c configs/$run.yaml $G  # one clip per request, 16 in flight; resumable
   uv run darija labels -c configs/$run.yaml     # -> work/<run>/labels.parquet (+ hub)
 done
 uv run darija build-train -c configs/gt100.yaml -c configs/extra.yaml --out your-username/darija-train --push
@@ -202,22 +204,23 @@ Judge, from any machine with the repo (no GPU needed). The first request starts 
 downloads the weights (~23 GB for QAT, a few minutes); later starts are faster.
 
 ```bash
+export DARIJA_JUDGE_URL="https://<workspace>--darija-judge-judge.us-east.modal.direct/v1"
 export MODAL_JUDGE_TOKEN="<token-id>.<token-secret>"
 export WANDB_PROJECT=darija-asr        # optional: follow the run on wandb.ai (once: `uv run wandb login`)
-J='--set merge.base_url=https://<workspace>--darija-judge-judge.us-east.modal.direct/v1
-   --set merge.api_key_env=MODAL_JUDGE_TOKEN --set merge.model=judge
-   --set merge.workers=96 --set merge.max_tokens=1024'
-T='merge.extra_body={chat_template_kwargs: {enable_thinking: false}}'
 
 uv run darija agree -c configs/gold.yaml
-uv run darija merge -c configs/gold.yaml $J --set "$T" --limit 30     # test: read the output, note the speed
-uv run darija merge -c configs/gold.yaml $J --set "$T"                # the rest of gold
+uv run darija merge -c configs/gold.yaml --limit 30     # test: read the output, note the speed
+uv run darija merge -c configs/gold.yaml                # the rest of gold
 for run in gt100 extra; do
   uv run darija agree -c configs/$run.yaml
-  uv run darija merge -c configs/$run.yaml $J --set "$T"
+  uv run darija merge -c configs/$run.yaml
 done
 modal app stop darija-judge     # stop paying as soon as it is done
 ```
+
+The judge defaults (`configs/base.yaml`, `merge:`) are this Gemma server: model name `judge`,
+temperature 0 (greedy, so the same candidates always give the same verdict), thinking off,
+96 requests in flight.
 
 With `WANDB_PROJECT` set, each `merge` is a wandb run (grouped by run name) showing clips judged,
 speed, errors, reject rate, confidence and tokens every 100 clips, plus a `judged_clips` table with
