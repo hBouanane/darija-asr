@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from .. import audio as audio_utils
 from ..store import Run, done_ids, read_workset, write_part
+from ..tracking import Tracker
 from . import load_backend
 
 
@@ -52,16 +53,19 @@ def transcribe(cfg: dict, model: str, shard: int = 0, num_shards: int = 1, limit
                 unpushed.clear()
             rows.clear()  # in place: the loop holds this same list
 
+    tracker = Tracker(cfg, f"transcribe-{model}", {"model": model, **model_cfg, "shard": shard,
+                                                   "num_shards": num_shards, "clips_to_go": len(todo_ids)})
     pbar = tqdm(total=len(todo_ids), desc=model)
     try:
-        _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar)
+        _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar, tracker)
     finally:
         # Also on SystemExit (e.g. the vLLM server went down): keep what is done.
         flush()
         pbar.close()
+        tracker.finish()
 
 
-def _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar) -> None:
+def _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar, tracker) -> None:
     audio_seconds = compute_seconds = 0.0
     # One working-set shard in memory at a time keeps RAM flat on Colab.
     for shard_file in sorted(run.workset_dir.glob("shard-*.parquet")):
@@ -84,6 +88,8 @@ def _transcribe_loop(run, backend, todo_ids, rows, flush, flush_every, pbar) -> 
                 rows.append({"id": r["id"], "text": text, "error": error, "seconds": elapsed / len(batch)})
             pbar.update(len(batch))
             pbar.set_postfix(rtfx=f"{audio_seconds / max(compute_seconds, 1e-6):.1f}")
+            tracker.log({"clips_done": pbar.n, "audio_hours_done": audio_seconds / 3600,
+                         "rtfx": audio_seconds / max(compute_seconds, 1e-6), "batch_failed": error is not None})
             if len(rows) >= flush_every:
                 flush()
 

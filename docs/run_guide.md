@@ -203,6 +203,7 @@ downloads the weights (~23 GB for QAT, a few minutes); later starts are faster.
 
 ```bash
 export MODAL_JUDGE_TOKEN="<token-id>.<token-secret>"
+export WANDB_PROJECT=darija-asr        # optional: follow the run on wandb.ai (once: `uv run wandb login`)
 J='--set merge.base_url=https://<workspace>--darija-judge-judge.us-east.modal.direct/v1
    --set merge.api_key_env=MODAL_JUDGE_TOKEN --set merge.model=judge
    --set merge.workers=96 --set merge.max_tokens=1024'
@@ -217,6 +218,10 @@ for run in gt100 extra; do
 done
 modal app stop darija-judge     # stop paying as soon as it is done
 ```
+
+With `WANDB_PROJECT` set, each `merge` is a wandb run (grouped by run name) showing clips judged,
+speed, errors, reject rate, confidence and tokens every 100 clips, plus a `judged_clips` table with
+the candidates next to the verdict; `transcribe` and `labels` log their progress and totals too.
 
 Cost: ~35k clips at ~2k tokens in and ~150 out each: roughly 1-3 GPU hours, so about $3-8 on the
 L40S (QAT) or $5-15 on the H100 (bf16), including start-up. To compare quality, judge 30 gold clips

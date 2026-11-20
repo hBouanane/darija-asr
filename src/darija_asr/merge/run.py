@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -9,6 +10,7 @@ from tqdm import tqdm
 
 from ..agreement import load_sources
 from ..store import Run, done_ids, latest_per_id, read_parts, write_part
+from ..tracking import Tracker
 from .judge import Judge, custom_id, error_row, parse_message
 from .prompt import build_system_prompt, build_user_message
 
@@ -82,12 +84,22 @@ def merge_sync(cfg: dict, limit: int | None = None) -> None:
     if todo.empty:
         return
     judge = _judge(cfg)
+    mcfg = cfg["merge"]
+    tracker = Tracker(cfg, "merge", {k: mcfg.get(k) for k in ("model", "provider", "base_url", "workers",
+                                                              "max_tokens", "extra_body", "mode")}
+                      | {"sources": cfg["agreement"]["sources"], "clips_to_judge": len(todo)})
     rows: list[dict] = []
-    unpushed: list = []  # parts whose upload failed go up with the next one
-    with ThreadPoolExecutor(max_workers=int(cfg["merge"].get("workers", 8))) as pool:
+    done: list[dict] = []    # every result of this call, for the wandb stats and sample table
+    unpushed: list = []      # parts whose upload failed go up with the next one
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=int(mcfg.get("workers", 8))) as pool:
         futures = {pool.submit(judge.call, msg): cid for cid, msg in _messages(cfg, todo)}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="judge"):
-            rows.append({"id": futures[fut], **fut.result()})
+            row = {"id": futures[fut], **fut.result()}
+            rows.append(row)
+            done.append(row)
+            if len(done) % 100 == 0 or len(done) == len(futures):
+                tracker.log(_merge_stats(done, time.time() - t0))
             if len(rows) >= 500:
                 unpushed.append(write_part(pd.DataFrame(rows), run.merge_dir))
                 if run.push_files(unpushed, f"merge +{len(rows)}"):
@@ -96,7 +108,27 @@ def merge_sync(cfg: dict, limit: int | None = None) -> None:
     if rows:
         unpushed.append(write_part(pd.DataFrame(rows), run.merge_dir))
     run.push_files(unpushed, "merge: last parts")
+    if tracker.wb:
+        sample = todo.merge(pd.DataFrame(done), on="id", suffixes=("", "_judge"))
+        cols = ["id", "duration", *cfg["agreement"]["sources"], "text", "confidence", "reject", "notes", "error"]
+        tracker.table("judged_clips", sample[[c for c in cols if c in sample]])
+        tracker.summary(_merge_stats(done, time.time() - t0))
+    tracker.finish()
     _summary(run)
+
+
+def _merge_stats(done: list[dict], elapsed: float) -> dict:
+    df = pd.DataFrame(done)
+    ok = df[df["error"].isna()]
+    stats = {"judged": len(df), "errors": int(df["error"].notna().sum()),
+             "clips_per_s": len(df) / max(elapsed, 1e-9),
+             "reject_rate": float(ok["reject"].mean()) if len(ok) else 0.0}
+    for level in ("high", "medium", "low"):
+        stats[f"confidence_{level}"] = float((ok["confidence"] == level).mean()) if len(ok) else 0.0
+    for col in ("input_tokens", "output_tokens", "cache_read_tokens"):
+        if col in df:
+            stats[col] = int(df[col].fillna(0).sum())
+    return stats
 
 
 # -- Message Batches (50% cheaper, asynchronous) --------------------------------
@@ -224,6 +256,11 @@ def build_labels(cfg: dict) -> pd.DataFrame:
     labels.to_parquet(run.labels_path, index=False)
     run.push("labels.parquet")
 
+    tracker = Tracker(cfg, "labels")
+    tracker.summary({"labelled_clips": len(labels), "labelled_hours": float(labels["duration"].sum() / 3600),
+                     "clips_in_run": len(agreement),
+                     **{f"method_{k}": int(v) for k, v in labels["method"].value_counts().items()}})
+    tracker.finish()
     print(f"{len(labels)} labelled clips ({labels['duration'].sum() / 3600:.1f} h) of {len(agreement)}; "
           f"by method: {labels['method'].value_counts().to_dict()}")
     if not merged.empty:

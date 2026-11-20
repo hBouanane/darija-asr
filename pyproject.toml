@@ -23,6 +23,7 @@ dependencies = [
     "tqdm",
     "websockets>=13",  # client for the vLLM Voxtral server
     "httpx",           # client for vLLM transcription servers (MoulSot, Cohere)
+    "wandb",           # optional run tracking (off unless WANDB_PROJECT / wandb.project is set)
 ]
 
 [project.optional-dependencies]

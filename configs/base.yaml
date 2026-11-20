@@ -9,6 +9,12 @@ workdir: work
 # DARIJA_HUB_REPO environment variable.
 hub_repo: null
 
+# Weights & Biases tracking of transcribe / merge / labels. Off unless a project is set
+# here or in the WANDB_PROJECT environment variable (log in once: `wandb login`).
+wandb:
+  project: null
+  entity: null
+
 source:
   dataset: atlasia/MoulSot-Full
   config: 100-gt-2.5        # folder in the dataset repo
