@@ -26,6 +26,20 @@ a convention of the final dataset, so change it before the large runs, not after
 - Negation: ما...ش attached (ماعرفتش، ماكاينش).
 - No diacritics (tashkeel), no tatweel.
 
+## Suffixes and short words
+- Possessive and object pronouns are attached: ي، ك، و، ها، نا، كم، هم
+  (كتابي، كتابك، كتابو، كتابها، كتابنا، كتابكم، كتابهم؛ قاليهم، عطاها).
+  "His" after a consonant is و, not ه: كتابو، دارو.
+- After a final vowel: "my" is يا and "his" is ه (خويا، خوه؛ ماماه).
+- Before a suffix, the feminine ة becomes ت: مدرسة > مدرستي، مدرستو، مدرستها.
+- ديال is a separate word and takes the same suffixes: الكتاب ديالي، ديالك، ديالو،
+  ديالها، ديالنا، ديالكم، ديالهم.
+- Plurals: ين and ات attached (معلمين، معلمات).
+- Pronouns: أنا، نتا، نتي، هو، هي، حنا، نتوما، هوما.
+- Question words: شكون، شنو، أشنو، علاش، فين، منين، إمتا، كيفاش، شحال.
+- Numbers 11-19: حضاش، طناش، تلطاش، ربعطاش، خمسطاش، سطاش، سبعطاش، تمنطاش،
+  تسعطاش (+ر before a noun: طناشر كتاب).
+
 ## Gender and number endings
 Speech recognizers often drop short word endings, so a candidate may show the bare
 masculine form where the speaker said the feminine or the plural.
